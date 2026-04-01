@@ -1,0 +1,7 @@
+FROM node:20-alpine
+
+RUN corepack enable
+
+WORKDIR /workspace
+
+CMD ["sh", "-lc", "pnpm install --no-frozen-lockfile && pnpm --filter @newquantmodel/web dev -- --host 0.0.0.0"]

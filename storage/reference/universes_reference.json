@@ -1,0 +1,168 @@
+[
+  {
+    "market": "crypto",
+    "universe": "crypto_top50_spot",
+    "coverageDate": "2026-04-01",
+    "memberCount": 2,
+    "policyNotes": [
+      "Top 50 spot market cap universe",
+      "Stablecoins excluded",
+      "Tradable subset requires Binance perpetual proxy"
+    ],
+    "tradableProxy": "Binance perpetual archive",
+    "dataSource": "CoinGecko + Binance",
+    "coverageMode": "approx_bootstrap",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "00:00/04:00/08:00/12:00/16:00/20:00 UTC",
+    "lastRefreshAt": "2026-04-01T00:35:36.042032+00:00"
+  },
+  {
+    "market": "cn_equity",
+    "universe": "csi300",
+    "coverageDate": "2026-04-01",
+    "memberCount": 5,
+    "policyNotes": [
+      "Monthly PIT snapshots from yfiua",
+      "Daily forward snapshots archived locally"
+    ],
+    "tradableProxy": "IF main contract",
+    "dataSource": "yfiua + EastMoney",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "Asia/Shanghai 16:30",
+    "lastRefreshAt": "2026-04-01T01:06:04.646036+00:00"
+  },
+  {
+    "market": "index",
+    "universe": "sse_composite",
+    "coverageDate": "2026-04-01",
+    "memberCount": 1,
+    "policyNotes": [
+      "Index baseline forecast universe"
+    ],
+    "tradableProxy": null,
+    "dataSource": "EastMoney",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-03-31",
+    "coveragePct": 100.0,
+    "refreshSchedule": "Asia/Shanghai 16:30",
+    "lastRefreshAt": "2026-04-01T01:06:04.646036+00:00"
+  },
+  {
+    "market": "index",
+    "universe": "csi300_index",
+    "coverageDate": "2026-04-01",
+    "memberCount": 1,
+    "policyNotes": [
+      "Index baseline forecast universe"
+    ],
+    "tradableProxy": null,
+    "dataSource": "EastMoney",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-03-31",
+    "coveragePct": 100.0,
+    "refreshSchedule": "Asia/Shanghai 16:30",
+    "lastRefreshAt": "2026-04-01T01:06:04.646036+00:00"
+  },
+  {
+    "market": "us_equity",
+    "universe": "sp500",
+    "coverageDate": "2026-04-01",
+    "memberCount": 5,
+    "policyNotes": [
+      "Monthly PIT snapshots from yfiua",
+      "Daily forward snapshots archived locally"
+    ],
+    "tradableProxy": "SPY / SH",
+    "dataSource": "yfiua + Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  },
+  {
+    "market": "us_equity",
+    "universe": "nasdaq100",
+    "coverageDate": "2026-04-01",
+    "memberCount": 5,
+    "policyNotes": [
+      "Monthly PIT snapshots from yfiua",
+      "Daily forward snapshots archived locally"
+    ],
+    "tradableProxy": "QQQ / PSQ",
+    "dataSource": "yfiua + Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  },
+  {
+    "market": "us_equity",
+    "universe": "dow30",
+    "coverageDate": "2026-04-01",
+    "memberCount": 5,
+    "policyNotes": [
+      "Monthly PIT snapshots from yfiua",
+      "Daily forward snapshots archived locally"
+    ],
+    "tradableProxy": "DIA / DOG",
+    "dataSource": "yfiua + Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  },
+  {
+    "market": "index",
+    "universe": "dow_index",
+    "coverageDate": "2026-04-01",
+    "memberCount": 1,
+    "policyNotes": [
+      "Index baseline forecast universe"
+    ],
+    "tradableProxy": "DIA / DOG",
+    "dataSource": "Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  },
+  {
+    "market": "index",
+    "universe": "nasdaq100_index",
+    "coverageDate": "2026-04-01",
+    "memberCount": 1,
+    "policyNotes": [
+      "Index baseline forecast universe"
+    ],
+    "tradableProxy": "QQQ / PSQ",
+    "dataSource": "Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  },
+  {
+    "market": "index",
+    "universe": "sp500_index",
+    "coverageDate": "2026-04-01",
+    "memberCount": 1,
+    "policyNotes": [
+      "Index baseline forecast universe"
+    ],
+    "tradableProxy": "SPY / SH",
+    "dataSource": "Yahoo Finance",
+    "coverageMode": "point_in_time",
+    "historyStartDate": "2021-04-01",
+    "coveragePct": 100.0,
+    "refreshSchedule": "America/New_York 17:30",
+    "lastRefreshAt": "2026-04-01T01:06:44.423149+00:00"
+  }
+]

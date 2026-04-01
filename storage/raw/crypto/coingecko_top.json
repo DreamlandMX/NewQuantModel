@@ -1,0 +1,18 @@
+[
+  {
+    "coingecko_id": "bitcoin",
+    "symbol": "BTC",
+    "name": "Bitcoin",
+    "market_cap_rank": 1,
+    "market_cap": 1358576764451,
+    "current_price": 67847.0
+  },
+  {
+    "coingecko_id": "ethereum",
+    "symbol": "ETH",
+    "name": "Ethereum",
+    "market_cap_rank": 2,
+    "market_cap": 253153990713,
+    "current_price": 2096.68
+  }
+]

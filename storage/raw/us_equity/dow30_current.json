@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "GS",
+    "name": "The Goldman Sachs Group, Inc.",
+    "universe": "dow30",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "CAT",
+    "name": "Caterpillar Inc.",
+    "universe": "dow30",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "MSFT",
+    "name": "Microsoft Corporation",
+    "universe": "dow30",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "AMGN",
+    "name": "Amgen Inc.",
+    "universe": "dow30",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "HD",
+    "name": "The Home Depot, Inc.",
+    "universe": "dow30",
+    "market": "us_equity"
+  }
+]

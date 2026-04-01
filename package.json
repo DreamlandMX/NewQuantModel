@@ -1,0 +1,26 @@
+{
+  "name": "newquantmodel",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.8.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "api:dev": "pnpm --filter @newquantmodel/api dev",
+    "web:dev": "pnpm --filter @newquantmodel/web dev",
+    "research:smoke": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main smoke --root .",
+    "research:publish-sample": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main publish-sample --root .",
+    "research:build-baseline": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main build-baseline-signals --root .",
+    "research:build-ml": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main build-ml-signals --root .",
+    "research:backtest": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main backtest-baseline --root .",
+    "research:publish-real": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main publish-real --root .",
+    "research:refresh-full": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main refresh-real --root . --years 5",
+    "research:scheduler": "PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main scheduler --root . --years 5"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.12"
+  }
+}

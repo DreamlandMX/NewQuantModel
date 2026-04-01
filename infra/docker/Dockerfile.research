@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+
+WORKDIR /workspace
+ENV PYTHONPATH=/workspace/apps/research/src:/workspace/packages/shared-types/python
+
+CMD ["python", "-m", "newquantmodel.cli.main", "worker", "--root", "/workspace"]

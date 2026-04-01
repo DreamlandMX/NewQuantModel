@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "NVDA",
+    "name": "Nvidia",
+    "universe": "sp500",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "universe": "sp500",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "MSFT",
+    "name": "Microsoft",
+    "universe": "sp500",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "AMZN",
+    "name": "Amazon",
+    "universe": "sp500",
+    "market": "us_equity"
+  },
+  {
+    "symbol": "GOOGL",
+    "name": "Alphabet Inc. (Class A)",
+    "universe": "sp500",
+    "market": "us_equity"
+  }
+]

@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: newquantmodel
+      POSTGRES_USER: newquantmodel
+      POSTGRES_PASSWORD: newquantmodel
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      APP_ROOT: /workspace
+      PUBLISHED_DATA_DIR: /workspace/storage/published
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://newquantmodel:newquantmodel@postgres:5432/newquantmodel
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./:/workspace
+      - /workspace/node_modules
+      - /workspace/apps/api/node_modules
+      - /workspace/packages/shared-types/node_modules
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: http://localhost:4000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/workspace
+      - /workspace/node_modules
+      - /workspace/apps/web/node_modules
+      - /workspace/packages/shared-types/node_modules
+
+  research-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.research
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      APP_ROOT: /workspace
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://newquantmodel:newquantmodel@postgres:5432/newquantmodel
+      PUBLISHED_DATA_DIR: /workspace/storage/published
+    volumes:
+      - ./:/workspace
+    command: python -m newquantmodel.cli.main worker --root /workspace --years 5 --poll-seconds 60
+
+volumes:
+  postgres-data:

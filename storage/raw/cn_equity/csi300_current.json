@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "000001.SZ",
+    "name": "\u5e73\u5b89\u94f6\u884c",
+    "universe": "csi300",
+    "market": "cn_equity"
+  },
+  {
+    "symbol": "000002.SZ",
+    "name": "\u4e07\u79d1A",
+    "universe": "csi300",
+    "market": "cn_equity"
+  },
+  {
+    "symbol": "000063.SZ",
+    "name": "\u4e2d\u5174\u901a\u8baf",
+    "universe": "csi300",
+    "market": "cn_equity"
+  },
+  {
+    "symbol": "000100.SZ",
+    "name": "TCL\u79d1\u6280",
+    "universe": "csi300",
+    "market": "cn_equity"
+  },
+  {
+    "symbol": "000157.SZ",
+    "name": "\u4e2d\u8054\u91cd\u79d1",
+    "universe": "csi300",
+    "market": "cn_equity"
+  }
+]
