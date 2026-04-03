@@ -4,6 +4,8 @@ import type {
   DataHealthResponse,
   ForecastResponse,
   JobRecord,
+  LiveQuoteRecord,
+  LiveQuoteResponse,
   RankingResponse,
   ReportManifest,
   TradePlanResponse,
@@ -35,13 +37,41 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  health: () => getJson<{ ok: boolean; service: string; summary: { generatedAt: string | null; universes: number; forecasts: number; rankings: number; jobs: number; dataHealth: number } }>("/health"),
+  health: () =>
+    getJson<{
+      ok: boolean;
+      service: string;
+      summary: {
+        generatedAt: string | null;
+        universes: number;
+        forecasts: number;
+        rankings: number;
+        jobs: number;
+        dataHealth: number;
+        scheduler: {
+          workerStatus: "running" | "stopped";
+          heartbeatAt: string | null;
+          lastError: string | null;
+          pollSeconds: number | null;
+          markets: Array<{
+            market: string;
+            lastSuccessAt: string | null;
+            nextScheduledAt: string | null;
+            lastCompletedBucket: string | null;
+            lastError: string | null;
+          }>;
+        };
+        tradePlanCounts: Record<"actionable" | "filtered" | "expired" | "stale", number>;
+      };
+    }>("/health"),
   universes: () => getJson<UniversesResponse>("/api/universes"),
   assets: () => getJson<{ items: AssetRecord[] }>("/api/assets"),
   dataHealth: () => getJson<DataHealthResponse>("/api/health/data"),
   forecasts: (query = "") => getJson<ForecastResponse>(`/api/forecasts${query}`),
   rankings: (query = "") => getJson<RankingResponse>(`/api/rankings${query}`),
   tradePlans: (query = "") => getJson<TradePlanResponse>(`/api/trade-plans${query}`),
+  liveQuotes: (query = "") => getJson<LiveQuoteResponse>(`/api/live/quotes${query}`),
+  liveQuote: (symbol: string) => getJson<LiveQuoteRecord>(`/api/live/quotes/${encodeURIComponent(symbol)}`),
   asset: (symbol: string) => getJson<AssetRecord>(`/api/assets/${encodeURIComponent(symbol)}`),
   backtest: (strategyId: string) => getJson<BacktestSummary>(`/api/backtests/${encodeURIComponent(strategyId)}`),
   jobs: () => getJson<{ items: JobRecord[] }>("/api/jobs"),

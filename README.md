@@ -58,6 +58,57 @@ PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmod
 pnpm research:scheduler
 ```
 
+### Always-on worker
+
+If you want trade plans to refresh automatically and expire cleanly without manual intervention, run the long-lived worker instead of relying on one-off publishes:
+
+```bash
+bash scripts/run_research_worker.sh
+```
+
+The worker writes:
+
+- log: `storage/logs/research-worker.log`
+- pid: `storage/logs/research-worker.pid`
+- scheduler state: `storage/reference/scheduler_state.json`
+
+On `Windows + WSL`, the recommended auto-start action for Task Scheduler is:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File E:\NewQuantModel\scripts\start_research_worker.ps1
+```
+
+To register the scheduled task automatically:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File E:\NewQuantModel\scripts\register_research_worker_task.ps1
+```
+
+To verify the task later:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File E:\NewQuantModel\scripts\check_research_worker_task.ps1
+```
+
+Recommended Task Scheduler setup:
+
+1. Trigger on user logon or machine startup.
+2. Enable restart on failure.
+3. Keep a single instance only.
+
+When the worker is running, the frontend and API will reflect:
+
+- current `Actionable`, `Filtered`, `Expired`, and `Stale` trade-plan states
+- worker heartbeat and next refresh window
+- stale fallback reasons when a market refresh fails
+
+Workbench now supports a `Status` filter so you can focus on:
+
+- `Actionable`
+- `Expired`
+- `Stale`
+- `Filtered`
+
 Default schedule:
 
 - `crypto`: every 4 hours in `UTC`
@@ -81,6 +132,7 @@ Published artifacts carry:
 - `stale`
 - `coverageMode`
 - `coveragePct`
+- runtime trade-plan state: `status`, `isExpired`, `isBlocked`, `blockedReason`, `evaluatedAt`
 
 ## Sample + smoke path
 

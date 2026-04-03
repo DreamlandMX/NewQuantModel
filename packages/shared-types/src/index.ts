@@ -6,11 +6,14 @@ export type Market = z.infer<typeof marketSchema>;
 export const strategyModeSchema = z.enum(["long_only", "hedged"]);
 export type StrategyMode = z.infer<typeof strategyModeSchema>;
 
-export const rebalanceFrequencySchema = z.enum(["daily", "weekly"]);
+export const rebalanceFrequencySchema = z.enum(["intraday", "daily", "weekly"]);
 export type RebalanceFrequency = z.infer<typeof rebalanceFrequencySchema>;
 
 export const tradeSideSchema = z.enum(["long", "short"]);
 export type TradeSide = z.infer<typeof tradeSideSchema>;
+
+export const tradePlanStatusSchema = z.enum(["actionable", "filtered", "expired", "stale"]);
+export type TradePlanStatus = z.infer<typeof tradePlanStatusSchema>;
 
 export const jobTypeSchema = z.enum(["ingest", "feature", "train", "backtest", "publish", "report"]);
 export type JobType = z.infer<typeof jobTypeSchema>;
@@ -51,6 +54,9 @@ export const assetRecordSchema = z.object({
   quoteAsset: z.string().nullable(),
   hasPerpetualProxy: z.boolean(),
   historyCoverageStart: z.string(),
+  sortRank: z.number(),
+  sortMetric: z.number().nullable(),
+  sortMetricLabel: z.string(),
   stale: z.boolean(),
   publishedAt: z.string(),
   dataSnapshotVersion: z.string()
@@ -69,10 +75,35 @@ export const forecastRecordSchema = z.object({
   q90: z.number(),
   alphaScore: z.number(),
   confidence: z.number(),
+  indicatorUnavailable: z.boolean(),
+  macdLine: z.number(),
+  macdSignal: z.number(),
+  macdHist: z.number(),
+  macdState: z.string(),
+  rsi14: z.number(),
+  rsiState: z.string(),
+  atr14: z.number(),
+  atrPct: z.number(),
+  bbUpper: z.number(),
+  bbMid: z.number(),
+  bbLower: z.number(),
+  bbWidth: z.number(),
+  bbPosition: z.number(),
+  bbState: z.string(),
+  kValue: z.number(),
+  dValue: z.number(),
+  jValue: z.number(),
+  kdjState: z.string(),
   regime: z.string(),
   riskFlags: z.array(z.string()),
   modelVersion: z.string(),
   asOfDate: z.string(),
+  signalFrequency: rebalanceFrequencySchema,
+  sourceFrequency: rebalanceFrequencySchema,
+  isDerivedSignal: z.boolean(),
+  forecastValidity: z.enum(["valid", "conflict", "adjusted"]).default("valid"),
+  forecastConflictReason: z.string().nullable().default(null),
+  forecastAdjusted: z.boolean().default(false),
   publishedAt: z.string(),
   dataSnapshotVersion: z.string(),
   stale: z.boolean(),
@@ -96,6 +127,14 @@ export const rankingRecordSchema = z.object({
   signalBreakdown: z.record(z.number()),
   asOfDate: z.string(),
   modelVersion: z.string(),
+  signalFrequency: rebalanceFrequencySchema,
+  sourceFrequency: rebalanceFrequencySchema,
+  isDerivedSignal: z.boolean(),
+  forecastValidity: z.enum(["valid", "conflict", "adjusted"]).default("valid"),
+  forecastConflictReason: z.string().nullable().default(null),
+  forecastAdjusted: z.boolean().default(false),
+  priceBasis: z.string().default("asset_spot"),
+  executionBasis: z.string().default("native_market"),
   publishedAt: z.string(),
   dataSnapshotVersion: z.string(),
   stale: z.boolean(),
@@ -123,18 +162,74 @@ export const tradePlanRecordSchema = z.object({
   expectedReturn: z.number(),
   pUp: z.number(),
   confidence: z.number(),
+  directionProbability: z.number(),
+  tradeConfidence: z.number(),
+  srUnavailable: z.boolean(),
+  setupType: z.string(),
+  levelRegime: z.string(),
+  nearestSupport: z.number(),
+  nearestResistance: z.number(),
+  supportDistancePct: z.number(),
+  resistanceDistancePct: z.number(),
+  levelStrengthSupport: z.number(),
+  levelStrengthResistance: z.number(),
+  entrySource: z.string(),
+  stopSource: z.string(),
+  targetSource: z.string(),
+  indicatorUnavailable: z.boolean(),
+  macdLine: z.number(),
+  macdSignal: z.number(),
+  macdHist: z.number(),
+  macdState: z.string(),
+  rsi14: z.number(),
+  rsiState: z.string(),
+  atr14: z.number(),
+  atrPct: z.number(),
+  bbUpper: z.number(),
+  bbMid: z.number(),
+  bbLower: z.number(),
+  bbWidth: z.number(),
+  bbPosition: z.number(),
+  bbState: z.string(),
+  kValue: z.number(),
+  dValue: z.number(),
+  jValue: z.number(),
+  kdjState: z.string(),
+  indicatorAlignmentScore: z.number(),
+  indicatorNotes: z.string(),
   actionable: z.boolean(),
   rejectionReason: z.string().nullable(),
+  selectionRank: z.number(),
+  selectionReason: z.string(),
+  conflictGroupKey: z.string(),
   executionSymbol: z.string().nullable(),
   executionMode: z.string(),
   expiresAt: z.string(),
   modelVersion: z.string(),
   asOfDate: z.string(),
+  signalFrequency: rebalanceFrequencySchema,
+  sourceFrequency: rebalanceFrequencySchema,
+  isDerivedSignal: z.boolean(),
   publishedAt: z.string(),
   dataSnapshotVersion: z.string(),
   stale: z.boolean(),
   coverageMode: z.enum(["approx_bootstrap", "point_in_time"]),
-  coveragePct: z.number()
+  coveragePct: z.number(),
+  sortRank: z.number(),
+  sortMetric: z.number().nullable(),
+  sortMetricLabel: z.string(),
+  snapshotPrice: z.number(),
+  livePrice: z.number().nullable(),
+  liveUpdatedAt: z.string().nullable(),
+  priceSource: z.string().nullable(),
+  priceDriftPct: z.number().nullable(),
+  quoteStale: z.boolean(),
+  runtimeFlags: z.array(z.string()),
+  status: tradePlanStatusSchema,
+  isExpired: z.boolean(),
+  isBlocked: z.boolean(),
+  blockedReason: z.string().nullable(),
+  evaluatedAt: z.string()
 });
 export type TradePlanRecord = z.infer<typeof tradePlanRecordSchema>;
 
@@ -160,6 +255,9 @@ export const backtestSummarySchema = z.object({
   topDecileSpread: z.number(),
   costStress: z.array(costStressRecordSchema),
   modelVersion: z.string(),
+  signalFrequency: rebalanceFrequencySchema,
+  sourceFrequency: rebalanceFrequencySchema,
+  isDerivedSignal: z.boolean(),
   publishedAt: z.string(),
   dataSnapshotVersion: z.string(),
   stale: z.boolean(),
@@ -204,6 +302,23 @@ export const tradePlanResponseSchema = z.object({
   items: z.array(tradePlanRecordSchema)
 });
 export type TradePlanResponse = z.infer<typeof tradePlanResponseSchema>;
+
+export const liveQuoteRecordSchema = z.object({
+  symbol: z.string(),
+  market: marketSchema,
+  lastPrice: z.number(),
+  markPrice: z.number().nullable(),
+  priceChangePct24h: z.number().nullable(),
+  updatedAt: z.string(),
+  source: z.string(),
+  isStale: z.boolean()
+});
+export type LiveQuoteRecord = z.infer<typeof liveQuoteRecordSchema>;
+
+export const liveQuoteResponseSchema = z.object({
+  items: z.array(liveQuoteRecordSchema)
+});
+export type LiveQuoteResponse = z.infer<typeof liveQuoteResponseSchema>;
 
 export const universesResponseSchema = z.object({
   items: z.array(universeRecordSchema)

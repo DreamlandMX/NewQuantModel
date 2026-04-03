@@ -60,16 +60,16 @@ def handle_ingest(root: str, market: str, years: int, limit: int | None) -> int:
     return 0
 
 
-def handle_build_baseline(root: str) -> int:
+def handle_build_baseline(root: str, fast: bool = False, full: bool = False) -> int:
     paths = AppPaths.from_root(root)
-    build_baseline_signals(paths)
+    build_baseline_signals(paths, fast=fast, full=full)
     print("Built baseline signals")
     return 0
 
 
-def handle_build_ml(root: str) -> int:
+def handle_build_ml(root: str, fast: bool = False, full: bool = False) -> int:
     paths = AppPaths.from_root(root)
-    build_ml_signals(paths)
+    build_ml_signals(paths, fast=fast, full=full)
     print("Built ML overlay signals")
     return 0
 
@@ -88,16 +88,16 @@ def handle_publish_real(root: str) -> int:
     return 0
 
 
-def handle_refresh_real(root: str, years: int, limit: int | None) -> int:
+def handle_refresh_real(root: str, years: int, limit: int | None, fast: bool = False, full: bool = False) -> int:
     paths = AppPaths.from_root(root)
-    refresh_real(paths, years=years, limit=limit)
+    refresh_real(paths, years=years, limit=limit, fast=fast, full=full)
     print(f"Refreshed real snapshot years={years} limit={limit}")
     return 0
 
 
-def handle_refresh_market(root: str, market: str, years: int, limit: int | None) -> int:
+def handle_refresh_market(root: str, market: str, years: int, limit: int | None, fast: bool = False, full: bool = False) -> int:
     paths = AppPaths.from_root(root)
-    refresh_market(paths, market=market, years=years, limit=limit)
+    refresh_market(paths, market=market, years=years, limit=limit, fast=fast, full=full)
     print(f"Refreshed market snapshot market={market} years={years} limit={limit}")
     return 0
 
@@ -172,6 +172,11 @@ def _train_output(paths: AppPaths) -> str:
     return str(paths.normalized_dir / "ranking_panel.parquet")
 
 
+def _add_mode_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--fast", action="store_true", help="Use cached panels and reduced GA budgets for faster iteration.")
+    parser.add_argument("--full", action="store_true", help="Force full recompute and disable cached GA reuse.")
+
+
 def _backtest_output(paths: AppPaths) -> str:
     backtest_models(paths)
     return str(paths.normalized_dir / "backtest_panel.parquet")
@@ -221,9 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     baseline = subparsers.add_parser("build-baseline-signals")
     baseline.add_argument("--root", required=True)
+    _add_mode_flags(baseline)
 
     ml = subparsers.add_parser("build-ml-signals")
     ml.add_argument("--root", required=True)
+    _add_mode_flags(ml)
 
     backtest = subparsers.add_parser("backtest-baseline")
     backtest.add_argument("--root", required=True)
@@ -235,12 +242,14 @@ def build_parser() -> argparse.ArgumentParser:
     refresh.add_argument("--root", required=True)
     refresh.add_argument("--years", type=int, default=5)
     refresh.add_argument("--limit", type=int)
+    _add_mode_flags(refresh)
 
     refresh_market_parser = subparsers.add_parser("refresh-market")
     refresh_market_parser.add_argument("--root", required=True)
     refresh_market_parser.add_argument("--market", required=True, choices=["crypto", "cn_equity", "us_equity"])
     refresh_market_parser.add_argument("--years", type=int, default=5)
     refresh_market_parser.add_argument("--limit", type=int)
+    _add_mode_flags(refresh_market_parser)
 
     run_job = subparsers.add_parser("run-job")
     run_job.add_argument("--root", required=True)
@@ -272,17 +281,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ingest":
         return handle_ingest(args.root, args.market, args.years, args.limit)
     if args.command == "build-baseline-signals":
-        return handle_build_baseline(args.root)
+        return handle_build_baseline(args.root, getattr(args, "fast", False), getattr(args, "full", False))
     if args.command == "build-ml-signals":
-        return handle_build_ml(args.root)
+        return handle_build_ml(args.root, getattr(args, "fast", False), getattr(args, "full", False))
     if args.command == "backtest-baseline":
         return handle_backtest(args.root)
     if args.command == "publish-real":
         return handle_publish_real(args.root)
     if args.command == "refresh-real":
-        return handle_refresh_real(args.root, args.years, args.limit)
+        return handle_refresh_real(args.root, args.years, args.limit, getattr(args, "fast", False), getattr(args, "full", False))
     if args.command == "refresh-market":
-        return handle_refresh_market(args.root, args.market, args.years, args.limit)
+        return handle_refresh_market(args.root, args.market, args.years, args.limit, getattr(args, "fast", False), getattr(args, "full", False))
     if args.command == "run-job":
         return handle_run_job(args.root, args.job_id, args.job_type)
     if args.command == "scheduler":

@@ -222,10 +222,10 @@ def write_research_pdf(
     styles = _build_styles()
 
     top_trades = sorted(
-        [item for item in trade_plans if bool(item.get("actionable"))],
+        [item for item in trade_plans if str(item.get("status", "")).lower() == "actionable" or bool(item.get("actionable"))],
         key=lambda item: (
             _to_float(item.get("riskRewardRatio")),
-            _to_float(item.get("confidence")),
+            _to_float(item.get("tradeConfidence", item.get("confidence"))),
             _to_float(item.get("rewardPct")),
         ),
         reverse=True,
@@ -259,7 +259,7 @@ def write_research_pdf(
         f"Model versions in production: {', '.join(model_versions) if model_versions else 'No model versions published.'}",
         (
             f"Highest-conviction trade: {_text(best_trade.get('symbol'))} {_text(best_trade.get('side')).upper()} "
-            f"with {_number(best_trade.get('riskRewardRatio'))}x risk-reward and {_percent(best_trade.get('confidence'), 0)} confidence."
+            f"with {_number(best_trade.get('riskRewardRatio'))}x risk-reward, {_percent(best_trade.get('directionProbability', best_trade.get('pUp')), 0)} direction probability, and {_percent(best_trade.get('tradeConfidence', best_trade.get('confidence')), 0)} trade confidence."
             if best_trade
             else "No actionable trade passed the current publication thresholds."
         ),
@@ -305,12 +305,13 @@ def write_research_pdf(
                         _price(item.get("stopLossPrice")),
                         _price(item.get("takeProfitPrice")),
                         f"{_number(item.get('riskRewardRatio'))}x",
-                        _percent(item.get("confidence"), 0),
+                        _percent(item.get("directionProbability", item.get("pUp")), 0),
+                        _percent(item.get("tradeConfidence", item.get("confidence")), 0),
                         _human_time(item.get("expiresAt")),
                     ]
                     for item in top_trades
                 ],
-                headers=["Symbol", "Side", "Entry", "SL", "TP", "RR", "Confidence", "Expiry"],
+                headers=["Symbol", "Side", "Entry", "SL", "TP", "RR", "Dir Prob", "Trade Conf", "Expiry"],
                 styles=styles,
             )
         )

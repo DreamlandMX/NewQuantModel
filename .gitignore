@@ -13,9 +13,15 @@ venv
 *.pyo
 *.pyd
 *.log
+*.joblib
 .env
 .env.local
 .DS_Store
 storage/published/*.json
 storage/exports/*
 !storage/exports/.gitkeep
+output/playwright/*
+storage/catalog/*
+storage/logs/*
+storage/normalized/*
+storage/raw/*

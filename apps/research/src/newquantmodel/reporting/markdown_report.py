@@ -20,10 +20,10 @@ def render_markdown_report(
     backtests = backtests or []
     top_rankings = sorted(rankings, key=lambda item: float(item.get("score", 0.0)), reverse=True)[:8]
     top_trades = sorted(
-        [item for item in trade_plans if bool(item.get("actionable"))],
+        [item for item in trade_plans if str(item.get("status", "")).lower() == "actionable" or bool(item.get("actionable"))],
         key=lambda item: (
             float(item.get("riskRewardRatio", 0.0)),
-            float(item.get("confidence", 0.0)),
+            float(item.get("tradeConfidence", item.get("confidence", 0.0))),
             float(item.get("rewardPct", 0.0)),
         ),
         reverse=True,
@@ -51,7 +51,7 @@ def render_markdown_report(
     ]
     for item in forecasts[:5]:
         lines.append(
-                f"- `{item['symbol']}` `{item['horizon']}`: expected return `{item['expectedReturn']:.2%}`, median `{item['q50']:.2%}`, confidence `{item['confidence']:.0%}`"
+            f"- `{item['symbol']}` `{item['horizon']}`: expected return `{item['expectedReturn']:.2%}`, median `{item['q50']:.2%}`, direction probability `{item['pUp']:.0%}`"
         )
     lines.extend(
         [
@@ -62,7 +62,7 @@ def render_markdown_report(
     )
     for item in top_trades:
         lines.append(
-            f"- `{item['symbol']}` `{item['side']}` `{item['horizon']}`: entry `{item['entryPrice']:.4f}`, SL `{item['stopLossPrice']:.4f}`, TP `{item['takeProfitPrice']:.4f}`, RR `{item['riskRewardRatio']:.2f}x`, confidence `{item['confidence']:.0%}`"
+            f"- `{item['symbol']}` `{item['side']}` `{item['horizon']}`: entry `{item['entryPrice']:.4f}`, SL `{item['stopLossPrice']:.4f}`, TP `{item['takeProfitPrice']:.4f}`, RR `{item['riskRewardRatio']:.2f}x`, direction probability `{item.get('directionProbability', item.get('pUp', 0.0)):.0%}`, trade confidence `{item.get('tradeConfidence', item.get('confidence', 0.0)):.0%}`"
         )
     lines.extend(
         [

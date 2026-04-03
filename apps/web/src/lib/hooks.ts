@@ -12,29 +12,30 @@ export function useDashboardData() {
   const forecasts = useQuery({ queryKey: ["forecasts"], queryFn: () => api.forecasts(), refetchInterval: refreshMs });
   const rankings = useQuery({ queryKey: ["rankings"], queryFn: () => api.rankings(), refetchInterval: refreshMs });
   const tradePlans = useQuery({ queryKey: ["trade-plans"], queryFn: () => api.tradePlans("?actionableOnly=false"), refetchInterval: refreshMs });
+  const liveQuotes = useQuery({ queryKey: ["live-quotes"], queryFn: () => api.liveQuotes(), refetchInterval: 5_000 });
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: api.jobs, refetchInterval: 5_000 });
   const report = useQuery({ queryKey: ["report"], queryFn: api.latestReport, retry: false, refetchInterval: refreshMs });
 
-  return { health, universes, assets, dataHealth, forecasts, rankings, tradePlans, jobs, report };
+  return { health, universes, assets, dataHealth, forecasts, rankings, tradePlans, liveQuotes, jobs, report };
 }
 
 export function useWorkbenchState() {
   const [market, setMarket] = useState("crypto");
-  const [strategyMode, setStrategyMode] = useState("long_only");
   const [rebalanceFreq, setRebalanceFreq] = useState("daily");
   const [tradableOnly, setTradableOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   return useMemo(
     () => ({
       market,
       setMarket,
-      strategyMode,
-      setStrategyMode,
       rebalanceFreq,
       setRebalanceFreq,
       tradableOnly,
-      setTradableOnly
+      setTradableOnly,
+      statusFilter,
+      setStatusFilter
     }),
-    [market, strategyMode, rebalanceFreq, tradableOnly]
+    [market, rebalanceFreq, tradableOnly, statusFilter]
   );
 }

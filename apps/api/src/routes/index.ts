@@ -25,6 +25,26 @@ export async function registerRoutes(app: FastifyInstance, store: PublishedStore
     return item;
   });
 
+  app.get("/api/live/quotes", async (request) => {
+    const query = request.query as { market?: string; symbols?: string };
+    const symbols = query.symbols
+      ? query.symbols
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : undefined;
+    return store.getLiveQuotes({ market: query.market, symbols });
+  });
+
+  app.get("/api/live/quotes/:symbol", async (request, reply) => {
+    const params = request.params as { symbol: string };
+    const item = store.getLiveQuote(params.symbol);
+    if (!item) {
+      return reply.code(404).send({ message: `Unknown live quote ${params.symbol}` });
+    }
+    return item;
+  });
+
   app.get("/api/forecasts", async (request) => {
     const query = request.query as { market?: string; universe?: string; horizon?: string };
     return store.getForecasts(query);

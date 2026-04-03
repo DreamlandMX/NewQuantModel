@@ -80,6 +80,8 @@ def publish_sample_snapshot(paths: AppPaths) -> ReportManifest:
     write_json(paths.published_dir / "forecasts.json", {"items": forecasts})
     write_json(paths.published_dir / "rankings.json", {"items": rankings})
     write_json(paths.published_dir / "trade-plans.json", {"items": trade_plans})
+    write_json(paths.published_dir / "trade-plans-active.json", {"items": [item for item in trade_plans if bool(item.get("actionable"))]})
+    write_json(paths.published_dir / "trade-plans-inactive.json", {"items": [item for item in trade_plans if not bool(item.get("actionable"))]})
     write_json(paths.published_dir / "backtests.json", {"items": backtests})
     manifest = generate_report_bundle(paths.exports_dir, published_dir=paths.published_dir)
     write_json(paths.published_dir / "report-manifest.json", manifest)

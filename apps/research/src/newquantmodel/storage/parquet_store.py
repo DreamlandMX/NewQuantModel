@@ -11,9 +11,12 @@ from newquantmodel.config.settings import AppPaths
 DATASET_FILES = {
     "asset_master": "asset_master.parquet",
     "universe_membership": "universe_membership.parquet",
+    "bars_30m": "bars_30m.parquet",
     "bars_1h": "bars_1h.parquet",
+    "bars_4h": "bars_4h.parquet",
     "bars_1d": "bars_1d.parquet",
     "signal_panel": "signal_panel.parquet",
+    "external_factor_panel": "external_factor_panel.parquet",
     "crypto_feature_panel": "crypto_feature_panel.parquet",
     "baseline_forecast_panel": "baseline_forecast_panel.parquet",
     "baseline_ranking_panel": "baseline_ranking_panel.parquet",
@@ -22,6 +25,7 @@ DATASET_FILES = {
     "trade_plan_panel": "trade_plan_panel.parquet",
     "prediction_history_panel": "prediction_history_panel.parquet",
     "model_run_panel": "model_run_panel.parquet",
+    "ga_run_panel": "ga_run_panel.parquet",
     "backtest_panel": "backtest_panel.parquet",
     "data_health": "data_health.parquet",
 }

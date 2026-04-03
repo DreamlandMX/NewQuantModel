@@ -1,21 +1,38 @@
-import type { JobRecord, ReportManifest } from "@newquantmodel/shared-types";
+import type { DataHealthRecord, JobRecord, ReportManifest } from "@newquantmodel/shared-types";
 
 import { Panel } from "@newquantmodel/ui";
 
 import { ValueBlock } from "../components/ValueBlock";
-import { formatCompactPath, formatDualTime, humanizeToken } from "../lib/formatters";
+import { formatCompactPath, formatDualTime, formatMarketName, humanizeToken } from "../lib/formatters";
 
 const JOB_TYPES = ["ingest", "feature", "train", "backtest", "publish", "report"];
 
 export function JobCenterPage({
   jobs,
   report,
+  scheduler,
+  dataHealth,
   onRunJob
 }: {
   jobs: JobRecord[];
   report: ReportManifest | null;
+  scheduler: {
+    workerStatus: "running" | "stopped";
+    heartbeatAt: string | null;
+    lastError: string | null;
+    pollSeconds: number | null;
+    markets: Array<{
+      market: string;
+      lastSuccessAt: string | null;
+      nextScheduledAt: string | null;
+      lastCompletedBucket: string | null;
+      lastError: string | null;
+    }>;
+  } | null;
+  dataHealth: DataHealthRecord[];
   onRunJob: (type: string) => void;
 }) {
+  const workerHeartbeat = formatDualTime(scheduler?.heartbeatAt ?? null);
   return (
     <Panel title="Job Center" eyebrow="Batch control">
       <div className="job-actions">
@@ -42,6 +59,26 @@ export function JobCenterPage({
             </div>
           </article>
         ))}
+      </div>
+      <div className="value-grid value-grid--status">
+        <ValueBlock
+          label="Worker status"
+          primary={scheduler?.workerStatus === "running" ? "Auto-refresh active" : "Worker stopped"}
+          secondary={workerHeartbeat.primary}
+          tertiary={scheduler?.lastError ?? `Polling every ${scheduler?.pollSeconds ?? 60}s`}
+        />
+        {scheduler?.markets.map((item) => {
+          const health = dataHealth.find((row) => row.market === item.market);
+          return (
+            <ValueBlock
+              key={`worker-${item.market}`}
+              label={`${formatMarketName(item.market)} worker`}
+              primary={`Next ${formatDualTime(item.nextScheduledAt).primary}`}
+              secondary={`Last success ${formatDualTime(item.lastSuccessAt).primary}`}
+              tertiary={item.lastError ?? (health?.notes.join(" | ") || "No recent errors")}
+            />
+          );
+        })}
       </div>
       {report ? (
         <div className="value-grid value-grid--details">

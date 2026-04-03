@@ -83,3 +83,26 @@ def fetch_daily_history(symbol: str, start_ts: datetime, end_ts: datetime) -> pd
     if not frames:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
     return pd.concat(frames, ignore_index=True).sort_values("timestamp").drop_duplicates(subset=["timestamp"])
+
+
+def fetch_intraday_history(symbol: str, start_ts: datetime, end_ts: datetime, interval: str = "30m") -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for chunk_start, chunk_end in _chunk_range(start_ts, end_ts, interval):
+        payload = get_json(
+            YAHOO_CHART_URL.format(symbol=symbol),
+            params={
+                "interval": interval,
+                "period1": int(chunk_start.timestamp()),
+                "period2": int(chunk_end.timestamp()),
+                "includePrePost": "true",
+                "events": "div,split",
+            },
+            timeout=20,
+        )
+        parsed = _parse_payload(payload)
+        if not parsed.empty:
+            frames.append(parsed)
+
+    if not frames:
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+    return pd.concat(frames, ignore_index=True).sort_values("timestamp").drop_duplicates(subset=["timestamp"])

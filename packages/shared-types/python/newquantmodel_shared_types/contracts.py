@@ -6,8 +6,9 @@ from typing import Dict, List, Literal, Optional
 
 Market = Literal["crypto", "cn_equity", "us_equity", "index"]
 StrategyMode = Literal["long_only", "hedged"]
-RebalanceFrequency = Literal["daily", "weekly"]
+RebalanceFrequency = Literal["intraday", "daily", "weekly"]
 TradeSide = Literal["long", "short"]
+TradePlanStatus = Literal["actionable", "filtered", "expired", "stale"]
 JobType = Literal["ingest", "feature", "train", "backtest", "publish", "report"]
 JobStatus = Literal["queued", "running", "completed", "failed"]
 
@@ -46,6 +47,9 @@ class AssetRecord:
     quoteAsset: Optional[str] = None
     hasPerpetualProxy: bool = False
     historyCoverageStart: str = ""
+    sortRank: int = 0
+    sortMetric: Optional[float] = None
+    sortMetricLabel: str = ""
     stale: bool = False
     publishedAt: str = ""
     dataSnapshotVersion: str = ""
@@ -68,6 +72,31 @@ class ForecastRecord:
     riskFlags: List[str]
     modelVersion: str
     asOfDate: str
+    indicatorUnavailable: bool = False
+    macdLine: float = 0.0
+    macdSignal: float = 0.0
+    macdHist: float = 0.0
+    macdState: str = "unavailable"
+    rsi14: float = 0.0
+    rsiState: str = "unavailable"
+    atr14: float = 0.0
+    atrPct: float = 0.0
+    bbUpper: float = 0.0
+    bbMid: float = 0.0
+    bbLower: float = 0.0
+    bbWidth: float = 0.0
+    bbPosition: float = 0.5
+    bbState: str = "unavailable"
+    kValue: float = 50.0
+    dValue: float = 50.0
+    jValue: float = 50.0
+    kdjState: str = "unavailable"
+    signalFrequency: RebalanceFrequency = "daily"
+    sourceFrequency: RebalanceFrequency = "daily"
+    isDerivedSignal: bool = False
+    forecastValidity: Literal["valid", "conflict", "adjusted"] = "valid"
+    forecastConflictReason: Optional[str] = None
+    forecastAdjusted: bool = False
     publishedAt: str = ""
     dataSnapshotVersion: str = ""
     stale: bool = False
@@ -91,6 +120,9 @@ class RankingRecord:
     signalBreakdown: Dict[str, float]
     asOfDate: str
     modelVersion: str = ""
+    signalFrequency: RebalanceFrequency = "daily"
+    sourceFrequency: RebalanceFrequency = "daily"
+    isDerivedSignal: bool = False
     publishedAt: str = ""
     dataSnapshotVersion: str = ""
     stale: bool = False
@@ -125,11 +157,65 @@ class TradePlanRecord:
     expiresAt: str
     modelVersion: str
     asOfDate: str
+    directionProbability: float = 0.0
+    tradeConfidence: float = 0.0
+    srUnavailable: bool = False
+    setupType: str = "none"
+    levelRegime: str = "unavailable"
+    nearestSupport: float = 0.0
+    nearestResistance: float = 0.0
+    supportDistancePct: float = 0.0
+    resistanceDistancePct: float = 0.0
+    levelStrengthSupport: float = 0.0
+    levelStrengthResistance: float = 0.0
+    entrySource: str = "quantile_fallback"
+    stopSource: str = "quantile_fallback"
+    targetSource: str = "quantile_fallback"
+    indicatorUnavailable: bool = False
+    macdLine: float = 0.0
+    macdSignal: float = 0.0
+    macdHist: float = 0.0
+    macdState: str = "unavailable"
+    rsi14: float = 0.0
+    rsiState: str = "unavailable"
+    atr14: float = 0.0
+    atrPct: float = 0.0
+    bbUpper: float = 0.0
+    bbMid: float = 0.0
+    bbLower: float = 0.0
+    bbWidth: float = 0.0
+    bbPosition: float = 0.5
+    bbState: str = "unavailable"
+    kValue: float = 50.0
+    dValue: float = 50.0
+    jValue: float = 50.0
+    kdjState: str = "unavailable"
+    indicatorAlignmentScore: float = 0.0
+    indicatorNotes: str = ""
+    signalFrequency: RebalanceFrequency = "daily"
+    sourceFrequency: RebalanceFrequency = "daily"
+    isDerivedSignal: bool = False
+    forecastValidity: Literal["valid", "conflict", "adjusted"] = "valid"
+    forecastConflictReason: Optional[str] = None
+    forecastAdjusted: bool = False
+    priceBasis: str = "asset_spot"
+    executionBasis: str = "native_market"
+    selectionRank: int = 0
+    selectionReason: str = ""
+    conflictGroupKey: str = ""
     publishedAt: str = ""
     dataSnapshotVersion: str = ""
     stale: bool = False
     coverageMode: Literal["approx_bootstrap", "point_in_time"] = "point_in_time"
     coveragePct: float = 100.0
+    sortRank: int = 0
+    sortMetric: Optional[float] = None
+    sortMetricLabel: str = ""
+    status: TradePlanStatus = "filtered"
+    isExpired: bool = False
+    isBlocked: bool = False
+    blockedReason: Optional[str] = None
+    evaluatedAt: str = ""
 
 
 @dataclass(slots=True)
@@ -155,6 +241,9 @@ class BacktestSummary:
     topDecileSpread: float
     costStress: List[CostStressRecord]
     modelVersion: str = ""
+    signalFrequency: RebalanceFrequency = "daily"
+    sourceFrequency: RebalanceFrequency = "daily"
+    isDerivedSignal: bool = False
     publishedAt: str = ""
     dataSnapshotVersion: str = ""
     stale: bool = False

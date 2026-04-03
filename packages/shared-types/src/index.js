@@ -3,6 +3,7 @@ export const marketSchema = z.enum(["crypto", "cn_equity", "us_equity", "index"]
 export const strategyModeSchema = z.enum(["long_only", "hedged"]);
 export const rebalanceFrequencySchema = z.enum(["daily", "weekly"]);
 export const tradeSideSchema = z.enum(["long", "short"]);
+export const tradePlanStatusSchema = z.enum(["actionable", "filtered", "expired", "stale"]);
 export const jobTypeSchema = z.enum(["ingest", "feature", "train", "backtest", "publish", "report"]);
 export const jobStatusSchema = z.enum(["queued", "running", "completed", "failed"]);
 export const universeRecordSchema = z.object({
@@ -113,7 +114,12 @@ export const tradePlanRecordSchema = z.object({
     dataSnapshotVersion: z.string(),
     stale: z.boolean(),
     coverageMode: z.enum(["approx_bootstrap", "point_in_time"]),
-    coveragePct: z.number()
+    coveragePct: z.number(),
+    status: tradePlanStatusSchema,
+    isExpired: z.boolean(),
+    isBlocked: z.boolean(),
+    blockedReason: z.string().nullable(),
+    evaluatedAt: z.string()
 });
 export const costStressRecordSchema = z.object({
     label: z.string(),

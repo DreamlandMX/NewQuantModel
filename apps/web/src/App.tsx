@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { api } from "./lib/api";
-import { formatCompactPath, formatDualTime } from "./lib/formatters";
+import { formatCompactPath, formatDualTime, horizonSortValue } from "./lib/formatters";
 import { useDashboardData, useWorkbenchState } from "./lib/hooks";
 import { AssetDetailPage } from "./pages/AssetDetailPage";
 import { HealthPage } from "./pages/HealthPage";
@@ -15,8 +15,9 @@ type Section = "overview" | "workbench" | "asset" | "strategy" | "health" | "job
 
 export function App() {
   const [section, setSection] = useState<Section>("overview");
+  const [strategyMode, setStrategyMode] = useState<"long_only" | "hedged">("long_only");
   const workbench = useWorkbenchState();
-  const { health, universes, assets, dataHealth, forecasts, rankings, tradePlans, jobs, report } = useDashboardData();
+  const { health, universes, assets, dataHealth, forecasts, rankings, tradePlans, liveQuotes, jobs, report } = useDashboardData();
   const runJob = useMutation({
     mutationFn: (type: string) => api.runJob(type)
   });
@@ -28,7 +29,8 @@ export function App() {
     retry: false
   });
 
-  const strategyId = `${workbench.market}-${workbench.strategyMode}-${workbench.rebalanceFreq}`;
+  const strategyRebalanceFreq = workbench.rebalanceFreq === "intraday" ? "daily" : workbench.rebalanceFreq;
+  const strategyId = `${workbench.market}-${strategyMode}-${strategyRebalanceFreq}`;
   const backtestQuery = useQuery({
     queryKey: ["backtest", strategyId],
     queryFn: () => api.backtest(strategyId),
@@ -39,22 +41,41 @@ export function App() {
     const all = tradePlans.data?.items ?? [];
     return all
       .filter((row) => row.market === workbench.market)
-      .filter((row) => row.strategyMode === workbench.strategyMode && row.rebalanceFreq === workbench.rebalanceFreq)
-      .filter((row) => (workbench.tradableOnly ? row.actionable : true))
+      .filter((row) => row.rebalanceFreq === workbench.rebalanceFreq)
+      .filter((row) => (workbench.tradableOnly ? row.status === "actionable" : true))
+      .filter((row) => (workbench.statusFilter === "all" ? true : row.status === workbench.statusFilter))
       .sort((left, right) => {
-        if (Number(right.actionable) !== Number(left.actionable)) {
-          return Number(right.actionable) - Number(left.actionable);
+        const leftSortRank = Number.isFinite(left.sortRank) ? left.sortRank : 999999;
+        const rightSortRank = Number.isFinite(right.sortRank) ? right.sortRank : 999999;
+        if (leftSortRank !== rightSortRank) {
+          return leftSortRank - rightSortRank;
         }
-        if (right.riskRewardRatio !== left.riskRewardRatio) {
-          return right.riskRewardRatio - left.riskRewardRatio;
+        const symbolCompare = left.symbol.localeCompare(right.symbol);
+        if (symbolCompare !== 0) {
+          return symbolCompare;
         }
-        if (right.confidence !== left.confidence) {
-          return right.confidence - left.confidence;
+        const leftHorizon = horizonSortValue(left.horizon);
+        const rightHorizon = horizonSortValue(right.horizon);
+        if (leftHorizon !== rightHorizon) {
+          return leftHorizon - rightHorizon;
         }
-        return right.expectedReturn - left.expectedReturn;
+        const statusOrder = { actionable: 0, stale: 1, expired: 2, filtered: 3 } as const;
+        if (statusOrder[left.status] !== statusOrder[right.status]) {
+          return statusOrder[left.status] - statusOrder[right.status];
+        }
+        if (left.selectionRank !== right.selectionRank) {
+          return left.selectionRank - right.selectionRank;
+        }
+        if (right.tradeConfidence !== left.tradeConfidence) {
+          return right.tradeConfidence - left.tradeConfidence;
+        }
+        if (right.directionProbability !== left.directionProbability) {
+          return right.directionProbability - left.directionProbability;
+        }
+        return Math.abs(right.expectedReturn) - Math.abs(left.expectedReturn);
       })
-      .slice(0, 40);
-  }, [tradePlans.data?.items, workbench.market, workbench.rebalanceFreq, workbench.strategyMode, workbench.tradableOnly]);
+      .slice(0, 240);
+  }, [tradePlans.data?.items, workbench.market, workbench.rebalanceFreq, workbench.tradableOnly, workbench.statusFilter]);
 
   const filteredUniverses = useMemo(() => {
     return (universes.data?.items ?? []).filter((item) => (workbench.market === "index" ? item.market === "index" : item.market === workbench.market));
@@ -81,22 +102,26 @@ export function App() {
         universes={universes.data?.items ?? []}
         dataHealth={dataHealth.data?.items ?? []}
         forecasts={forecasts.data?.items ?? []}
+        tradePlans={tradePlans.data?.items ?? []}
+        liveQuotes={liveQuotes.data?.items ?? []}
         reportPath={report.data?.pdfPath ?? null}
         modelVersions={modelVersions}
+        scheduler={health.data?.summary.scheduler ?? null}
       />
     ),
     workbench: (
       <WorkbenchPage
         rows={filteredTradePlans}
         universes={filteredUniverses}
+        liveQuotes={liveQuotes.data?.items ?? []}
         market={workbench.market}
-        strategyMode={workbench.strategyMode}
         rebalanceFreq={workbench.rebalanceFreq}
         tradableOnly={workbench.tradableOnly}
+        statusFilter={workbench.statusFilter}
         onMarketChange={workbench.setMarket}
-        onStrategyModeChange={workbench.setStrategyMode}
         onRebalanceFreqChange={workbench.setRebalanceFreq}
         onTradableOnlyChange={workbench.setTradableOnly}
+        onStatusFilterChange={workbench.setStatusFilter}
       />
     ),
     asset: (
@@ -105,18 +130,42 @@ export function App() {
         tradePlans={(tradePlans.data?.items ?? []).filter((item) => item.symbol === focusedSymbol)}
         forecasts={(forecasts.data?.items ?? []).filter((item) => item.symbol === focusedSymbol)}
         rankings={(rankings.data?.items ?? []).filter((item) => item.symbol === focusedSymbol)}
+        liveQuote={(liveQuotes.data?.items ?? []).find((item) => item.symbol === (assetQuery.data?.tradableSymbol ?? focusedSymbol)) ?? (liveQuotes.data?.items ?? []).find((item) => item.symbol === focusedSymbol) ?? null}
       />
     ),
-    strategy: <StrategyLabPage backtest={backtestQuery.data ?? null} />,
+    strategy: (
+      <StrategyLabPage
+        backtest={backtestQuery.data ?? null}
+        strategyMode={strategyMode}
+        rebalanceFreq={strategyRebalanceFreq as "daily" | "weekly"}
+        onStrategyModeChange={setStrategyMode}
+        onRebalanceFreqChange={(value) => workbench.setRebalanceFreq(value)}
+      />
+    ),
     health: (
       <HealthPage
         generatedAt={health.data?.summary.generatedAt ?? null}
-        counts={health.data?.summary ?? { universes: 0, forecasts: 0, rankings: 0, jobs: 0, dataHealth: 0, generatedAt: null }}
+        counts={{
+          universes: health.data?.summary.universes ?? 0,
+          forecasts: health.data?.summary.forecasts ?? 0,
+          rankings: health.data?.summary.rankings ?? 0,
+          jobs: health.data?.summary.jobs ?? 0,
+          dataHealth: health.data?.summary.dataHealth ?? 0
+        }}
         dataHealth={dataHealth.data?.items ?? []}
         modelVersions={modelVersions}
+        scheduler={health.data?.summary.scheduler ?? null}
       />
     ),
-    jobs: <JobCenterPage jobs={jobs.data?.items ?? []} report={report.data ?? null} onRunJob={(type) => runJob.mutate(type)} />
+    jobs: (
+      <JobCenterPage
+        jobs={jobs.data?.items ?? []}
+        report={report.data ?? null}
+        scheduler={health.data?.summary.scheduler ?? null}
+        dataHealth={dataHealth.data?.items ?? []}
+        onRunJob={(type) => runJob.mutate(type)}
+      />
+    )
   };
 
   return (
@@ -167,7 +216,7 @@ export function App() {
 }
 
 function filteredSymbol(
-  tradePlans: { symbol: string; market: string; actionable: boolean; confidence: number; riskRewardRatio: number }[],
+  tradePlans: { symbol: string; market: string; status: "actionable" | "filtered" | "expired" | "stale"; tradeConfidence: number; riskRewardRatio: number; selectionRank: number; sortRank: number }[],
   rankings: { symbol: string; universe: string }[],
   forecasts: { symbol: string; market: string }[],
   market: string
@@ -175,13 +224,22 @@ function filteredSymbol(
   const fromTradePlans = tradePlans
     .filter((item) => item.market === market)
     .sort((left, right) => {
-      if (Number(right.actionable) !== Number(left.actionable)) {
-        return Number(right.actionable) - Number(left.actionable);
+      const leftSortRank = Number.isFinite(left.sortRank) ? left.sortRank : 999999;
+      const rightSortRank = Number.isFinite(right.sortRank) ? right.sortRank : 999999;
+      if (leftSortRank !== rightSortRank) {
+        return leftSortRank - rightSortRank;
+      }
+      const statusOrder = { actionable: 0, stale: 1, expired: 2, filtered: 3 } as const;
+      if (statusOrder[left.status] !== statusOrder[right.status]) {
+        return statusOrder[left.status] - statusOrder[right.status];
       }
       if (right.riskRewardRatio !== left.riskRewardRatio) {
         return right.riskRewardRatio - left.riskRewardRatio;
       }
-      return right.confidence - left.confidence;
+      if (left.selectionRank !== right.selectionRank) {
+        return left.selectionRank - right.selectionRank;
+      }
+      return right.tradeConfidence - left.tradeConfidence;
     })[0];
   if (fromTradePlans) {
     return fromTradePlans.symbol;

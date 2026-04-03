@@ -9,6 +9,7 @@ COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets"
 STABLE_IDS = {
     "tether",
     "usd-coin",
+    "usds",
     "dai",
     "first-digital-usd",
     "true-usd",
@@ -20,8 +21,30 @@ STABLE_IDS = {
     "gemini-dollar",
     "frax",
     "liquity-usd",
+    "rlusd",
+    "usd1-wlfi",
+    "bfusd",
+    "fdusd",
 }
-STABLE_SYMBOLS = {"USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "USDD", "USDP", "BUSD", "PYUSD", "GUSD", "FRAX", "LUSD"}
+STABLE_SYMBOLS = {
+    "USDT",
+    "USDC",
+    "USDS",
+    "DAI",
+    "FDUSD",
+    "TUSD",
+    "USDE",
+    "USDD",
+    "USDP",
+    "BUSD",
+    "PYUSD",
+    "GUSD",
+    "FRAX",
+    "LUSD",
+    "RLUSD",
+    "USD1",
+    "BFUSD",
+}
 
 
 def fetch_top_market_cap(limit: int = 50) -> pd.DataFrame:
