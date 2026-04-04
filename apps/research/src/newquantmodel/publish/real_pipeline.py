@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -33,6 +34,53 @@ INDEX_SORT_ORDER = {
     "^GSPC": 5,
 }
 CRYPTO_FORCED_TOP3 = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+
+def _parse_json_object(value: object) -> dict[str, object]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _validate_holdout_publish_gate(ga_runs: pd.DataFrame) -> None:
+    if ga_runs.empty:
+        return
+    threshold = float(os.getenv("NQM_PUBLISH_MIN_HOLDOUT_FITNESS", "-1.5"))
+    scoped = ga_runs.copy()
+    if "pipeline" not in scoped.columns:
+        return
+    scoped = scoped[scoped["pipeline"].astype(str).str.startswith("ml-ga")]
+    if scoped.empty:
+        return
+    if "dataSignature" in scoped.columns:
+        signature_series = scoped["dataSignature"].astype(str).str.strip()
+        scoped = scoped[signature_series.str.len() > 0]
+        scoped = scoped[~signature_series.str.lower().isin({"none", "nan"})]
+    if scoped.empty:
+        return
+
+    failures: list[str] = []
+    for row in scoped.to_dict(orient="records"):
+        summary = _parse_json_object(row.get("metricSummary"))
+        holdout = summary.get("holdout") if isinstance(summary.get("holdout"), dict) else {}
+        fitness = holdout.get("fitness") if isinstance(holdout, dict) else None
+        if fitness is None:
+            failures.append(f"{row.get('pipeline')}:{row.get('signalFrequency')} missing holdout fitness")
+            continue
+        try:
+            fitness_value = float(fitness)
+        except (TypeError, ValueError):
+            failures.append(f"{row.get('pipeline')}:{row.get('signalFrequency')} invalid holdout fitness")
+            continue
+        if fitness_value < threshold:
+            failures.append(f"{row.get('pipeline')}:{row.get('signalFrequency')} holdout {fitness_value:.4f} < {threshold:.4f}")
+
+    if failures:
+        raise ValueError("Publish blocked by holdout gate: " + "; ".join(failures))
 
 
 def _publish_context(paths: AppPaths) -> dict[str, str]:
@@ -366,9 +414,23 @@ def _build_baseline_signals_impl(paths: AppPaths, *, fast: bool = False, full: b
     sync_duckdb(paths)
 
 
-def build_ml_signals(paths: AppPaths, *, fast: bool = False, full: bool = False) -> None:
+def build_ml_signals(
+    paths: AppPaths,
+    *,
+    fast: bool = False,
+    full: bool = False,
+    market: str | None = None,
+    signal_frequency: str | None = None,
+    pipeline: str | None = None,
+) -> None:
     with _research_runtime_mode(fast=fast, full=full):
-        build_ml_overlay(paths, reuse_cached=not full)
+        build_ml_overlay(
+            paths,
+            reuse_cached=not full,
+            market_filter=market,
+            signal_frequency_filter=signal_frequency,
+            pipeline_filter=pipeline,
+        )
         build_trade_plans(paths)
 
 
@@ -415,9 +477,11 @@ def publish_real(paths: AppPaths, *, renew_context: bool = True) -> None:
     trade_plans = read_frame(paths, "trade_plan_panel")
     backtests = read_frame(paths, "backtest_panel")
     data_health = read_frame(paths, "data_health")
+    ga_runs = read_frame(paths, "ga_run_panel")
     bars_1d = read_frame(paths, "bars_1d")
     bars_1h = read_frame(paths, "bars_1h")
     universes = read_json(paths.reference_dir / "universes_reference.json", [])
+    _validate_holdout_publish_gate(ga_runs)
     sort_lookup = _build_sort_lookup(paths, asset_master, rankings, bars_1d, bars_1h)
     allowed_crypto_symbols = _allowed_crypto_symbols(paths)
 

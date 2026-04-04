@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -230,13 +231,51 @@ def _trim_frame_for_optimization(frame: pd.DataFrame, signal_frequency: str) -> 
     return frame[frame["timestamp"].isin(keep_dates)].copy()
 
 
-def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
+def _signature_hash(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _frame_signature(frame: pd.DataFrame, feature_names: list[str] | None = None) -> dict[str, object]:
     if frame.empty or "timestamp" not in frame.columns:
-        return {"latestTimestamp": None, "rows": 0}
-    return {
+        payload = {
+            "latestTimestamp": None,
+            "rows": 0,
+            "dateCount": 0,
+            "symbolCount": 0,
+            "featureNames": sorted(feature_names or []),
+        }
+        payload["dataSignature"] = _signature_hash(payload)
+        return payload
+    payload = {
         "latestTimestamp": pd.Timestamp(frame["timestamp"].max()).isoformat(),
         "rows": int(len(frame)),
+        "dateCount": int(frame["timestamp"].nunique(dropna=True)),
+        "symbolCount": int(frame["symbol"].nunique(dropna=True)) if "symbol" in frame.columns else 0,
+        "featureNames": sorted(feature_names or []),
     }
+    payload["dataSignature"] = _signature_hash(payload)
+    return payload
+
+
+def _split_optimization_and_holdout(frame: pd.DataFrame, signal_frequency: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if frame.empty or "timestamp" not in frame.columns:
+        return frame.copy(), pd.DataFrame(columns=frame.columns)
+    unique_dates = _group_dates(frame)
+    if len(unique_dates) < 8:
+        return frame.copy(), pd.DataFrame(columns=frame.columns)
+    preferred = {"hourly": 72, "weekly": 12, "daily": 20}.get(signal_frequency, 20)
+    holdout_count = min(preferred, max(1, len(unique_dates) // 5))
+    if len(unique_dates) - holdout_count < max(4, len(unique_dates) // 2):
+        holdout_count = max(1, len(unique_dates) // 4)
+    if holdout_count <= 0 or holdout_count >= len(unique_dates):
+        return frame.copy(), pd.DataFrame(columns=frame.columns)
+    holdout_dates = set(unique_dates[-holdout_count:])
+    optimization = frame[~frame["timestamp"].isin(holdout_dates)].copy()
+    holdout = frame[frame["timestamp"].isin(holdout_dates)].copy()
+    if optimization.empty or holdout.empty:
+        return frame.copy(), pd.DataFrame(columns=frame.columns)
+    return optimization, holdout
 
 
 def _ga_config_for_frame(frame: pd.DataFrame, dimensions: int) -> GAConfig:
@@ -270,6 +309,7 @@ def _find_cached_ga_row(
     signal_frequency: str,
     model_version: str,
     latest_timestamp: str | None,
+    data_signature: str | None = None,
 ) -> pd.Series | None:
     if ga_runs.empty:
         return None
@@ -281,7 +321,11 @@ def _find_cached_ga_row(
     ].copy()
     if scoped.empty:
         return None
-    if latest_timestamp is not None and "latestTimestamp" in scoped.columns:
+    if data_signature is not None and "dataSignature" in scoped.columns:
+        scoped = scoped[scoped["dataSignature"].astype(str) == data_signature]
+        if scoped.empty:
+            return None
+    elif latest_timestamp is not None and "latestTimestamp" in scoped.columns:
         scoped = scoped[scoped["latestTimestamp"].astype(str) == latest_timestamp]
         if scoped.empty:
             return None
@@ -331,12 +375,15 @@ def _optimize_baseline_spec(
     ga_runs: pd.DataFrame | None = None,
     reuse_cached: bool = True,
 ) -> dict[str, object]:
-    optimization_frame = _trim_frame_for_optimization(frame, signal_frequency)
-    factor_names = [column for column in _feature_candidates_for_market(market, signal_frequency) if column in optimization_frame.columns]
+    trimmed_frame = _trim_frame_for_optimization(frame, signal_frequency)
+    factor_names = [column for column in _feature_candidates_for_market(market, signal_frequency) if column in trimmed_frame.columns]
     if not factor_names:
-        return {"weights": {}, "top_n": 10, "max_position": 0.10, "fitness": 0.0, "metrics": {}, "selected": []}
+        return {"weights": {}, "top_n": 10, "max_position": 0.10, "fitness": 0.0, "metrics": {}, "selected": [], "dataSignature": None}
+    optimization_frame, holdout_frame = _split_optimization_and_holdout(trimmed_frame, signal_frequency)
     eval_frame = optimization_frame.dropna(subset=["timestamp", "symbol"]).copy()
-    signature = _frame_signature(eval_frame)
+    if eval_frame.empty:
+        eval_frame = trimmed_frame.dropna(subset=["timestamp", "symbol"]).copy()
+    signature = _frame_signature(eval_frame, factor_names)
     cached_row = (
         _find_cached_ga_row(
             ga_runs if ga_runs is not None else pd.DataFrame(),
@@ -345,6 +392,7 @@ def _optimize_baseline_spec(
             signal_frequency=signal_frequency,
             model_version=BASELINE_MODEL_VERSION,
             latest_timestamp=str(signature["latestTimestamp"]),
+            data_signature=str(signature["dataSignature"]),
         )
         if reuse_cached
         else None
@@ -364,30 +412,43 @@ def _optimize_baseline_spec(
                 "summary": str(cached_row.get("metricSummary") or json.dumps({})),
                 "latestTimestamp": signature["latestTimestamp"],
                 "cacheHit": True,
+                "dataSignature": signature["dataSignature"],
             }
     target_col = f"target_{list(_horizon_periods_for_frequency(signal_frequency, market))[0]}"
 
-    def _evaluator(chromosome: np.ndarray) -> tuple[float, dict[str, float], dict[str, object]]:
-        weights, top_n, max_position = _decode_baseline_genes(chromosome, factor_names, market)
-        scored = eval_frame[["timestamp", "symbol", target_col, *factor_names]].copy()
+    def _score_candidate(candidate_frame: pd.DataFrame, weights: dict[str, float], top_n: int, max_position: float) -> tuple[float, dict[str, float]]:
+        scored = candidate_frame[["timestamp", "symbol", target_col, *factor_names]].copy()
         scored["score"] = _apply_weighted_score(scored, weights)
         cutoff_dates = _group_dates(scored)
         if len(cutoff_dates) > 30:
             scored = scored[scored["timestamp"].isin(cutoff_dates[len(cutoff_dates) // 3 :])].copy()
-        selected = [name for name, weight in weights.items() if abs(weight) > 1e-6]
-        fitness, metrics = score_candidate_history(
+        return score_candidate_history(
             scored,
             market=signal_frequency,
             target_col=target_col,
             top_n=top_n,
-            feature_count=len(selected),
+            feature_count=len([name for name, weight in weights.items() if abs(weight) > 1e-6]),
             total_features=len(factor_names),
         )
+
+    def _evaluator(chromosome: np.ndarray) -> tuple[float, dict[str, float], dict[str, object]]:
+        weights, top_n, max_position = _decode_baseline_genes(chromosome, factor_names, market)
+        fitness, metrics = _score_candidate(eval_frame, weights, top_n, max_position)
+        selected = [name for name, weight in weights.items() if abs(weight) > 1e-6]
         return fitness, metrics, {"selected": selected, "top_n": top_n, "max_position": max_position, "weights": weights}
 
     ga_config = _ga_config_for_frame(eval_frame, len(factor_names) * 2 + 2)
     result = run_genetic_search(dimensions=len(factor_names) * 2 + 2, evaluator=_evaluator, config=ga_config)
     payload = result.payload
+    holdout_metrics: dict[str, float] = {}
+    holdout_eval = holdout_frame.dropna(subset=["timestamp", "symbol", target_col]).copy()
+    if not holdout_eval.empty:
+        _, holdout_metrics = _score_candidate(
+            holdout_eval,
+            payload.get("weights", {}),
+            int(payload.get("top_n", 10)),
+            float(payload.get("max_position", 0.10)),
+        )
     return {
         "weights": payload.get("weights", {}),
         "top_n": int(payload.get("top_n", 10)),
@@ -397,10 +458,19 @@ def _optimize_baseline_spec(
         "selected": payload.get("selected", []),
         "latestTimestamp": signature["latestTimestamp"],
         "cacheHit": False,
+        "dataSignature": signature["dataSignature"],
         "summary": ga_summary_json(
             result,
             selected=list(payload.get("selected", [])),
-            extra={"market": market, "signalFrequency": signal_frequency, "rowsOptimized": int(len(eval_frame)), "gaBudget": {"population": ga_config.population, "generations": ga_config.generations}},
+            extra={
+                "market": market,
+                "signalFrequency": signal_frequency,
+                "rowsOptimized": int(len(eval_frame)),
+                "rowsHoldout": int(len(holdout_eval)),
+                "holdout": holdout_metrics,
+                "dataSignature": signature["dataSignature"],
+                "gaBudget": {"population": ga_config.population, "generations": ga_config.generations},
+            },
         ),
     }
 
@@ -415,12 +485,15 @@ def _optimize_ml_feature_subset(
     pipeline_name: str = "ml-ga",
     model_version: str = STOCK_MODEL_VERSION,
     reuse_cached: bool = True,
-) -> tuple[list[str], dict[str, float | int], str, dict[str, float], str | None]:
-    optimization_frame = _trim_frame_for_optimization(frame, signal_frequency)
-    feature_names = [column for column in _feature_candidates_for_market(market, signal_frequency) if column in optimization_frame.columns]
+) -> tuple[list[str], dict[str, float | int], str, dict[str, float], str | None, bool, str | None]:
+    trimmed_frame = _trim_frame_for_optimization(frame, signal_frequency)
+    feature_names = [column for column in _feature_candidates_for_market(market, signal_frequency) if column in trimmed_frame.columns]
     if not feature_names:
-        return [], {}, json.dumps({}), {}, None
-    signature = _frame_signature(optimization_frame)
+        return [], {}, json.dumps({}), {}, None, False, None
+    optimization_frame, holdout_frame = _split_optimization_and_holdout(trimmed_frame, signal_frequency)
+    if optimization_frame.empty:
+        optimization_frame = trimmed_frame.copy()
+    signature = _frame_signature(optimization_frame, feature_names)
     cached_row = (
         _find_cached_ga_row(
             ga_runs if ga_runs is not None else pd.DataFrame(),
@@ -429,6 +502,7 @@ def _optimize_ml_feature_subset(
             signal_frequency=signal_frequency,
             model_version=model_version,
             latest_timestamp=str(signature["latestTimestamp"]),
+            data_signature=str(signature["dataSignature"]),
         )
         if reuse_cached
         else None
@@ -438,7 +512,7 @@ def _optimize_ml_feature_subset(
         selected = json.loads(str(cached_row.get("selectedFactors") or "[]"))
         selected_list = [feature for feature in selected if feature in feature_names]
         if selected_list:
-            return selected_list, dict(config_payload), str(cached_row.get("metricSummary") or json.dumps({})), {"fitness": float(cached_row.get("fitness", 0.0) or 0.0)}, str(signature["latestTimestamp"])
+            return selected_list, dict(config_payload), str(cached_row.get("metricSummary") or json.dumps({})), {"fitness": float(cached_row.get("fitness", 0.0) or 0.0)}, str(signature["latestTimestamp"]), True, str(signature["dataSignature"])
 
     def _evaluator(chromosome: np.ndarray) -> tuple[float, dict[str, float], dict[str, object]]:
         selected = decode_feature_subset(chromosome, feature_names)
@@ -449,6 +523,13 @@ def _optimize_ml_feature_subset(
     ga_config = _ga_config_for_frame(optimization_frame, len(feature_names) + 6)
     result = run_genetic_search(dimensions=len(feature_names) + 6, evaluator=_evaluator, config=ga_config)
     payload = result.payload
+    holdout_metrics: dict[str, float | str] = {}
+    if not holdout_frame.empty:
+        try:
+            holdout_fitness, holdout_eval_metrics = evaluator_builder(holdout_frame, list(payload.get("selected", [])), dict(payload.get("model_kwargs", {})))
+            holdout_metrics = {"fitness": float(holdout_fitness), **holdout_eval_metrics}
+        except Exception as exc:
+            holdout_metrics = {"error": str(exc)}
     summary = ga_summary_json(
         result,
         selected=list(payload.get("selected", [])),
@@ -457,10 +538,13 @@ def _optimize_ml_feature_subset(
             "signalFrequency": signal_frequency,
             "modelKwargs": payload.get("model_kwargs", {}),
             "rowsOptimized": int(len(optimization_frame)),
+            "rowsHoldout": int(len(holdout_frame)),
+            "holdout": holdout_metrics,
+            "dataSignature": signature["dataSignature"],
             "gaBudget": {"population": ga_config.population, "generations": ga_config.generations},
         },
     )
-    return list(payload.get("selected", feature_names[: min(6, len(feature_names))])), dict(payload.get("model_kwargs", {})), summary, result.metrics, str(signature["latestTimestamp"])
+    return list(payload.get("selected", feature_names[: min(6, len(feature_names))])), dict(payload.get("model_kwargs", {})), summary, result.metrics, str(signature["latestTimestamp"]), False, str(signature["dataSignature"])
 
 
 def _frequency_provenance(signal_frequency: str) -> dict[str, object]:
@@ -742,10 +826,13 @@ def _fit_stock_latest_models(
 
     horizons = list(horizon_periods)
     regressors = {}
+    residual_sigma: dict[str, float] = {}
     for horizon in horizons:
         regressor = _make_regressor(**(model_kwargs or {}))
         regressor.fit(clean[feature_cols].fillna(0.0), clean[f"target_{horizon}"].fillna(0.0))
         regressors[horizon] = regressor
+        residuals = clean[f"target_{horizon}"].fillna(0.0) - np.asarray(regressor.predict(clean[feature_cols].fillna(0.0)), dtype="float64")
+        residual_sigma[horizon] = float(np.asarray(residuals, dtype="float64").std() or clean[f"target_{horizon}"].std() or 0.02)
 
     latest_ts = clean["timestamp"].max()
     latest = frame[frame["timestamp"] == latest_ts].dropna(subset=feature_cols).copy()
@@ -759,6 +846,8 @@ def _fit_stock_latest_models(
     latest["predictedReturn"] = 0.0
     for weight, horizon in zip(horizon_weights, horizons, strict=False):
         latest[f"pred_{horizon}"] = np.asarray(regressors[horizon].predict(latest[feature_cols].fillna(0.0)), dtype="float64")
+        latest[f"sigma_{horizon}"] = residual_sigma[horizon]
+        latest[f"pUp_{horizon}"] = np.asarray([_sigmoid(float(value) / max(residual_sigma[horizon], 1e-6)) for value in latest[f"pred_{horizon}"]], dtype="float64")
         latest["predictedReturn"] = latest["predictedReturn"] + weight * (latest[f"pred_{horizon}"] / max(horizon_periods[horizon], 1))
     latest["signalFrequency"] = signal_frequency
     latest["sourceFrequency"] = signal_frequency
@@ -815,13 +904,17 @@ def _fit_crypto_latest(
         raise ValueError(f"No clean crypto {signal_frequency} rows")
     regressor = _make_regressor(**(model_kwargs or {}))
     regressor.fit(clean[feature_cols].fillna(0.0), clean[f"target_{horizon}"].fillna(0.0))
+    residuals = clean[f"target_{horizon}"].fillna(0.0) - np.asarray(regressor.predict(clean[feature_cols].fillna(0.0)), dtype="float64")
+    residual_sigma = float(np.asarray(residuals, dtype="float64").std() or clean[f"target_{horizon}"].std() or 0.02)
     latest_ts = clean["timestamp"].max()
     latest = frame[frame["timestamp"] == latest_ts].dropna(subset=feature_cols).copy()
     if latest.empty:
         raise ValueError(f"No latest crypto {signal_frequency} rows")
     latest["score"] = np.asarray(regressor.predict(latest[feature_cols].fillna(0.0)), dtype="float64")
     latest["score"] = ((latest["score"] - latest["score"].mean()) / (latest["score"].std() or 1.0)).fillna(0.0)
-    latest[f"pred_{horizon}"] = latest["score"] * latest["ret_1d"].abs().replace(0.0, latest["ret_1d"].abs().median() or 0.01)
+    latest[f"pred_{horizon}"] = np.asarray(regressor.predict(latest[feature_cols].fillna(0.0)), dtype="float64")
+    latest[f"sigma_{horizon}"] = residual_sigma
+    latest[f"pUp_{horizon}"] = np.asarray([_sigmoid(float(value) / max(residual_sigma, 1e-6)) for value in latest[f"pred_{horizon}"]], dtype="float64")
     latest["signalFrequency"] = signal_frequency
     latest["sourceFrequency"] = signal_frequency
     latest["isDerivedSignal"] = False
@@ -853,6 +946,7 @@ def _fit_crypto_latest(
                     "latestRows": int(len(latest)),
                     "signalFrequency": signal_frequency,
                     "meanPrediction": float(latest[f"pred_{horizon}"].mean()),
+                    "residualSigma": residual_sigma,
                 }
             ),
             "message": f"Crypto {signal_frequency} overlay completed",
@@ -1247,23 +1341,24 @@ def _build_equity_rankings_and_forecasts(
 
             for horizon in horizons:
                 expected = float(row[f"pred_{horizon}"])
-                recent_return = row.get("ret_1d", 0.02)
-                if recent_return is None or not math.isfinite(float(recent_return)):
-                    recent_return = 0.02
-                scale = float(abs(expected) + abs(float(recent_return)) + 0.02)
+                sigma = float(row.get(f"sigma_{horizon}", 0.02) or 0.02)
+                interval = max(1.2816 * sigma, 0.005)
+                p_up = row.get(f"pUp_{horizon}")
+                if p_up is None or not math.isfinite(float(p_up)):
+                    p_up = _sigmoid(expected / max(interval, 1e-6))
                 forecast_rows.append(
                     {
                         "symbol": row["symbol"],
                         "market": market,
                         "universe": universe,
                         "horizon": horizon,
-                        "pUp": _sigmoid(expected / max(scale, 1e-6)),
+                        "pUp": float(p_up),
                         "expectedReturn": expected,
-                        "q10": expected - scale,
+                        "q10": expected - interval,
                         "q50": expected,
-                        "q90": expected + scale,
+                        "q90": expected + interval,
                         "alphaScore": float(row["score"]),
-                        "confidence": min(0.95, 0.55 + abs(float(row["score"])) / 5.0),
+                        "confidence": min(0.95, 0.55 + abs(expected) / max(interval, 1e-6) * 0.08),
                         "regime": "risk-on" if float(row[f"pred_{horizons[-1]}"]) > 0 else "risk-off",
                         "riskFlags": ["ml-overlay", "cross-sectional"],
                         "modelVersion": STOCK_MODEL_VERSION,
@@ -1363,9 +1458,11 @@ def _build_crypto_daily_rankings_and_forecasts(
 
             for horizon in ["1H", "4H", "1D"]:
                 q50 = float(row.get(f"q50_{horizon}", row["pred_1D"]))
-                q10 = float(row.get(f"q10_{horizon}", q50 - abs(q50)))
-                q90 = float(row.get(f"q90_{horizon}", q50 + abs(q50)))
-                p_up = float(row.get(f"pUp_{horizon}", _sigmoid(float(row["score"]))))
+                sigma = float(row.get(f"sigma_{horizon}", row.get("sigma_1D", 0.02)) or 0.02)
+                interval = max(1.2816 * sigma, 0.005)
+                q10 = float(row.get(f"q10_{horizon}", q50 - interval))
+                q90 = float(row.get(f"q90_{horizon}", q50 + interval))
+                p_up = float(row.get(f"pUp_{horizon}", row.get("pUp_1D", _sigmoid(float(row["score"])))))
                 forecast_rows.append(
                     {
                         "symbol": row["symbol"],
@@ -1378,7 +1475,7 @@ def _build_crypto_daily_rankings_and_forecasts(
                         "q50": q50,
                         "q90": q90,
                         "alphaScore": float(row["score"]),
-                        "confidence": min(0.97, 0.55 + abs(float(row["score"])) / 4.5),
+                        "confidence": min(0.97, 0.55 + abs(q50) / max(interval, 1e-6) * 0.08),
                         "regime": "risk-on" if float(row["score"]) > 0 else "risk-off",
                         "riskFlags": ["ml-overlay", "time-series", "quantile"],
                         "modelVersion": CRYPTO_MODEL_VERSION,
@@ -1474,20 +1571,21 @@ def _build_crypto_weekly_rankings_and_forecasts(
                 }
             )
             q50 = float(row["pred_1W"])
-            scale = float(abs(q50) + abs(row.get("ret_1d", 0.02) or 0.02) + 0.02)
+            sigma = float(row.get("sigma_1W", 0.02) or 0.02)
+            interval = max(1.2816 * sigma, 0.005)
             forecast_rows.append(
                 {
                     "symbol": row["symbol"],
                     "market": "crypto",
                     "universe": universe,
                     "horizon": "1W",
-                    "pUp": _sigmoid(float(row["score"])),
+                    "pUp": float(row.get("pUp_1W", _sigmoid(float(row["score"])))),
                     "expectedReturn": q50,
-                    "q10": q50 - scale,
+                    "q10": q50 - interval,
                     "q50": q50,
-                    "q90": q50 + scale,
+                    "q90": q50 + interval,
                     "alphaScore": float(row["score"]),
-                    "confidence": min(0.97, 0.55 + abs(float(row["score"])) / 4.5),
+                    "confidence": min(0.97, 0.55 + abs(q50) / max(interval, 1e-6) * 0.08),
                     "regime": "risk-on" if float(row["score"]) > 0 else "risk-off",
                     "riskFlags": ["ml-overlay", "weekly-time-series"],
                     "modelVersion": CRYPTO_MODEL_VERSION,
@@ -1635,6 +1733,7 @@ def _optimize_baseline_specs(signal_panel: pd.DataFrame, ga_runs: pd.DataFrame |
                     "metricSummary": spec.get("summary", json.dumps({})),
                     "trainedAt": _now_utc().isoformat(),
                     "latestTimestamp": spec.get("latestTimestamp"),
+                    "dataSignature": spec.get("dataSignature"),
                     "cacheHit": bool(spec.get("cacheHit", False)),
                 }
             )
@@ -1770,7 +1869,14 @@ def _attach_ga_summary(metric_rows: list[dict], ga_summary: str) -> list[dict]:
     return enriched
 
 
-def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
+def build_ml_overlay(
+    paths: AppPaths,
+    *,
+    reuse_cached: bool = True,
+    market_filter: str | None = None,
+    signal_frequency_filter: str | None = None,
+    pipeline_filter: str | None = None,
+) -> None:
     signal_panel = read_frame(paths, "signal_panel")
     bars_1h = read_frame(paths, "bars_1h")
     memberships = read_frame(paths, "universe_membership")
@@ -1789,18 +1895,24 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
     if not existing_ga_runs.empty:
         ga_frames.append(existing_ga_runs)
 
-    for market in ["cn_equity", "us_equity"]:
-        for signal_frequency in SIGNAL_FREQUENCIES:
+    for equity_market in ["cn_equity", "us_equity"]:
+        if market_filter not in {None, equity_market}:
+            continue
+        if pipeline_filter not in {None, "ml", "equity"}:
+            continue
+        for equity_frequency in SIGNAL_FREQUENCIES:
+            if signal_frequency_filter not in {None, equity_frequency}:
+                continue
             try:
-                horizon_periods = _horizon_periods_for_frequency(signal_frequency, market)
-                stock_panel = _prepare_stock_panel(signal_panel, market, signal_frequency)
+                horizon_periods = _horizon_periods_for_frequency(equity_frequency, equity_market)
+                stock_panel = _prepare_stock_panel(signal_panel, equity_market, equity_frequency)
                 if stock_panel.empty:
                     continue
-                selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp = _optimize_ml_feature_subset(
+                selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp, cache_hit, data_signature = _optimize_ml_feature_subset(
                     stock_panel,
-                    market,
-                    signal_frequency,
-                    evaluator_builder=lambda optimization_frame, selected, params, horizon_periods=horizon_periods, market=market, signal_frequency=signal_frequency: score_candidate_history(
+                    equity_market,
+                    equity_frequency,
+                    evaluator_builder=lambda optimization_frame, selected, params, horizon_periods=horizon_periods, market=equity_market, signal_frequency=equity_frequency: score_candidate_history(
                         _walk_forward_ranker(
                             optimization_frame,
                             selected,
@@ -1831,13 +1943,13 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
                     selected_features,
                     horizons=list(horizon_periods),
                     horizon_periods=horizon_periods,
-                    market=market,
+                    market=equity_market,
                     model_version=STOCK_MODEL_VERSION,
-                    signal_frequency=signal_frequency,
+                    signal_frequency=equity_frequency,
                     model_kwargs=model_kwargs,
                 )
-                latest, importance_map, metrics = _fit_stock_latest_models(stock_panel, selected_features, market, paths, signal_frequency, horizon_periods, model_kwargs)
-                rankings, forecasts = _build_equity_rankings_and_forecasts(latest, memberships, market, importance_map, signal_frequency, horizon_periods)
+                latest, importance_map, metrics = _fit_stock_latest_models(stock_panel, selected_features, equity_market, paths, equity_frequency, horizon_periods, model_kwargs)
+                rankings, forecasts = _build_equity_rankings_and_forecasts(latest, memberships, equity_market, importance_map, equity_frequency, horizon_periods)
                 final_rankings = replace_rows_by_keys(final_rankings, rankings, ["symbol", "universe", "rebalanceFreq", "strategyMode", "signalFrequency"])
                 final_forecasts = replace_rows_by_keys(final_forecasts, forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
                 history_frames.append(history)
@@ -1846,9 +1958,9 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
                     pd.DataFrame(
                         [
                             {
-                                "market": market,
+                                "market": equity_market,
                                 "pipeline": "ml-ga-ranker",
-                                "signalFrequency": signal_frequency,
+                                "signalFrequency": equity_frequency,
                                 "modelVersion": STOCK_MODEL_VERSION,
                                 "fitness": float(ga_metrics.get("fitness", 0.0)),
                                 "selectedFactors": json.dumps(selected_features),
@@ -1856,161 +1968,171 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
                                 "metricSummary": ga_summary,
                                 "trainedAt": _now_utc().isoformat(),
                                 "latestTimestamp": ga_latest_timestamp,
-                                "cacheHit": False,
+                                "dataSignature": data_signature,
+                                "cacheHit": cache_hit,
                             }
                         ]
                     )
                 )
             except Exception as exc:
-                run_frames.append(_failed_run(market, f"equity-ranker-{signal_frequency}", f"{market} {signal_frequency} overlay failed: {exc}", STOCK_MODEL_VERSION))
+                run_frames.append(_failed_run(equity_market, f"equity-ranker-{equity_frequency}", f"{equity_market} {equity_frequency} overlay failed: {exc}", STOCK_MODEL_VERSION))
 
-    try:
-        crypto_daily_panel = _prepare_crypto_panel(signal_panel, "daily")
-        selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp = _optimize_ml_feature_subset(
-            crypto_daily_panel,
-            "crypto",
-            "daily",
-            evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
-                _walk_forward_regression(
-                    optimization_frame,
-                    selected,
-                    "target_1D",
-                    preferred_step=10,
-                    market="crypto",
-                    model_version=CRYPTO_MODEL_VERSION,
-                    signal_frequency="daily",
-                    model_kwargs=params,
-                ).merge(
-                    optimization_frame[["timestamp", "symbol", "target_1D"]],
-                    on=["timestamp", "symbol"],
-                    how="left",
-                ),
-                market="daily",
-                target_col="target_1D",
-                top_n=10,
-                feature_count=len(selected),
-                total_features=max(len(_feature_candidates_for_market("crypto", "daily")), 1),
-            ),
-            ga_runs=existing_ga_runs,
-            pipeline_name="ml-ga-regressor",
-            model_version=CRYPTO_MODEL_VERSION,
-            reuse_cached=reuse_cached,
-        )
-        crypto_history = _walk_forward_regression(
-            crypto_daily_panel,
-            selected_features,
-            "target_1D",
-            preferred_step=10,
-            market="crypto",
-            model_version=CRYPTO_MODEL_VERSION,
-            signal_frequency="daily",
-            model_kwargs=model_kwargs,
-        )
-        crypto_daily_latest, crypto_importance, crypto_daily_runs = _fit_crypto_latest(crypto_daily_panel, selected_features, paths, "daily", "1D", model_kwargs)
-        crypto_hourly_panel = _build_crypto_hourly_panel(bars_1h)
-        write_frame(paths, "crypto_feature_panel", crypto_hourly_panel)
-        hourly_features = [column for column in CRYPTO_HOURLY_FEATURES if column in crypto_hourly_panel.columns]
-        selected_hourly_features, hourly_model_kwargs, hourly_ga_summary, hourly_ga_metrics, hourly_ga_latest_timestamp = _optimize_ml_feature_subset(
-            crypto_hourly_panel,
-            "crypto",
-            "hourly",
-            evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
-                optimization_frame.dropna(subset=[*selected, "target_1D"]).assign(
-                    score=lambda item: pd.Series(
-                        _make_regressor(**params)
-                        .fit(item[selected].fillna(0.0), item["target_1D"].fillna(0.0))
-                        .predict(item[selected].fillna(0.0)),
-                        index=item.index,
-                    )
-                )[["timestamp", "symbol", "score", "target_1D"]],
-                market="daily",
-                target_col="target_1D",
-                top_n=10,
-                feature_count=len(selected),
-                total_features=max(len(hourly_features), 1),
-            ),
-            ga_runs=existing_ga_runs,
-            pipeline_name="ml-ga-hourly",
-            model_version=CRYPTO_MODEL_VERSION,
-            reuse_cached=reuse_cached,
-        )
-        crypto_hourly_latest, crypto_hourly_runs = _fit_crypto_hourly_latest(crypto_hourly_panel, paths, selected_hourly_features, hourly_model_kwargs)
-        crypto_rankings, crypto_forecasts = _build_crypto_daily_rankings_and_forecasts(crypto_daily_latest, crypto_hourly_latest, memberships, crypto_importance)
-        final_rankings = replace_rows_by_keys(final_rankings, crypto_rankings, ["symbol", "universe", "rebalanceFreq", "strategyMode", "signalFrequency"])
-        final_forecasts = replace_rows_by_keys(final_forecasts, crypto_forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
-        history_frames.append(crypto_history)
-        run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_daily_runs, ga_summary)))
-        run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_hourly_runs, hourly_ga_summary)))
-        ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-regressor", "signalFrequency": "daily", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "cacheHit": False}]))
-        ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-hourly", "signalFrequency": "hourly", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(hourly_ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_hourly_features), "config": json.dumps(hourly_model_kwargs), "metricSummary": hourly_ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": hourly_ga_latest_timestamp, "cacheHit": False}]))
-    except Exception as exc:
-        run_frames.append(_failed_run("crypto", "crypto-overlay", f"crypto overlay failed: {exc}", CRYPTO_MODEL_VERSION))
-
-    try:
-        crypto_weekly_panel = _prepare_crypto_panel(signal_panel, "weekly")
-        selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp = _optimize_ml_feature_subset(
-            crypto_weekly_panel,
-            "crypto",
-            "weekly",
-            evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
-                _walk_forward_regression(
-                    optimization_frame,
-                    selected,
-                    "target_1W",
-                    preferred_step=4,
-                    market="crypto",
-                    model_version=CRYPTO_MODEL_VERSION,
-                    signal_frequency="weekly",
-                    model_kwargs=params,
-                ).merge(
-                    optimization_frame[["timestamp", "symbol", "target_1W"]],
-                    on=["timestamp", "symbol"],
-                    how="left",
-                ),
-                market="weekly",
-                target_col="target_1W",
-                top_n=10,
-                feature_count=len(selected),
-                total_features=max(len(_feature_candidates_for_market("crypto", "weekly")), 1),
-            ),
-            ga_runs=existing_ga_runs,
-            pipeline_name="ml-ga-regressor",
-            model_version=CRYPTO_MODEL_VERSION,
-            reuse_cached=reuse_cached,
-        )
-        crypto_weekly_history = _walk_forward_regression(
-            crypto_weekly_panel,
-            selected_features,
-            "target_1W",
-            preferred_step=4,
-            market="crypto",
-            model_version=CRYPTO_MODEL_VERSION,
-            signal_frequency="weekly",
-            model_kwargs=model_kwargs,
-        )
-        crypto_weekly_latest, crypto_weekly_importance, crypto_weekly_runs = _fit_crypto_latest(
-            crypto_weekly_panel, selected_features, paths, "weekly", "1W", model_kwargs
-        )
-        crypto_weekly_rankings, crypto_weekly_forecasts = _build_crypto_weekly_rankings_and_forecasts(
-            crypto_weekly_latest, memberships, crypto_weekly_importance
-        )
-        final_rankings = replace_rows_by_keys(final_rankings, crypto_weekly_rankings, ["symbol", "universe", "rebalanceFreq", "strategyMode", "signalFrequency"])
-        final_forecasts = replace_rows_by_keys(final_forecasts, crypto_weekly_forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
-        history_frames.append(crypto_weekly_history)
-        run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_weekly_runs, ga_summary)))
-        ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-regressor", "signalFrequency": "weekly", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "cacheHit": False}]))
-    except Exception as exc:
-        run_frames.append(_failed_run("crypto", "crypto-weekly", f"crypto weekly overlay failed: {exc}", CRYPTO_MODEL_VERSION))
-
-    for signal_frequency in SIGNAL_FREQUENCIES:
+    if market_filter in {None, "crypto"} and pipeline_filter in {None, "ml", "crypto"} and signal_frequency_filter in {None, "daily", "hourly"}:
         try:
-            horizon_periods = _horizon_periods_for_frequency(signal_frequency, "index")
-            index_panel = _prepare_index_panel(signal_panel, signal_frequency)
-            selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp = _optimize_ml_feature_subset(
+            crypto_daily_panel = _prepare_crypto_panel(signal_panel, "daily")
+            selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp, cache_hit, data_signature = _optimize_ml_feature_subset(
+                crypto_daily_panel,
+                "crypto",
+                "daily",
+                evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
+                    _walk_forward_regression(
+                        optimization_frame,
+                        selected,
+                        "target_1D",
+                        preferred_step=10,
+                        market="crypto",
+                        model_version=CRYPTO_MODEL_VERSION,
+                        signal_frequency="daily",
+                        model_kwargs=params,
+                    ).merge(
+                        optimization_frame[["timestamp", "symbol", "target_1D"]],
+                        on=["timestamp", "symbol"],
+                        how="left",
+                    ),
+                    market="daily",
+                    target_col="target_1D",
+                    top_n=10,
+                    feature_count=len(selected),
+                    total_features=max(len(_feature_candidates_for_market("crypto", "daily")), 1),
+                ),
+                ga_runs=existing_ga_runs,
+                pipeline_name="ml-ga-regressor",
+                model_version=CRYPTO_MODEL_VERSION,
+                reuse_cached=reuse_cached,
+            )
+            crypto_history = _walk_forward_regression(
+                crypto_daily_panel,
+                selected_features,
+                "target_1D",
+                preferred_step=10,
+                market="crypto",
+                model_version=CRYPTO_MODEL_VERSION,
+                signal_frequency="daily",
+                model_kwargs=model_kwargs,
+            )
+            crypto_daily_latest, crypto_importance, crypto_daily_runs = _fit_crypto_latest(crypto_daily_panel, selected_features, paths, "daily", "1D", model_kwargs)
+            crypto_hourly_panel = _build_crypto_hourly_panel(bars_1h)
+            if not crypto_hourly_panel.empty:
+                write_frame(paths, "crypto_feature_panel", crypto_hourly_panel)
+            hourly_features = [column for column in CRYPTO_HOURLY_FEATURES if column in crypto_hourly_panel.columns]
+            selected_hourly_features, hourly_model_kwargs, hourly_ga_summary, hourly_ga_metrics, hourly_ga_latest_timestamp, hourly_cache_hit, hourly_data_signature = _optimize_ml_feature_subset(
+                crypto_hourly_panel,
+                "crypto",
+                "hourly",
+                evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
+                    optimization_frame.dropna(subset=[*selected, "target_1D"]).assign(
+                        score=lambda item: pd.Series(
+                            _make_regressor(**params)
+                            .fit(item[selected].fillna(0.0), item["target_1D"].fillna(0.0))
+                            .predict(item[selected].fillna(0.0)),
+                            index=item.index,
+                        )
+                    )[["timestamp", "symbol", "score", "target_1D"]],
+                    market="daily",
+                    target_col="target_1D",
+                    top_n=10,
+                    feature_count=len(selected),
+                    total_features=max(len(hourly_features), 1),
+                ),
+                ga_runs=existing_ga_runs,
+                pipeline_name="ml-ga-hourly",
+                model_version=CRYPTO_MODEL_VERSION,
+                reuse_cached=reuse_cached,
+            )
+            crypto_hourly_latest, crypto_hourly_runs = _fit_crypto_hourly_latest(crypto_hourly_panel, paths, selected_hourly_features, hourly_model_kwargs)
+            crypto_rankings, crypto_forecasts = _build_crypto_daily_rankings_and_forecasts(crypto_daily_latest, crypto_hourly_latest, memberships, crypto_importance)
+            final_rankings = replace_rows_by_keys(final_rankings, crypto_rankings, ["symbol", "universe", "rebalanceFreq", "strategyMode", "signalFrequency"])
+            final_forecasts = replace_rows_by_keys(final_forecasts, crypto_forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
+            history_frames.append(crypto_history)
+            run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_daily_runs, ga_summary)))
+            run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_hourly_runs, hourly_ga_summary)))
+            ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-regressor", "signalFrequency": "daily", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "dataSignature": data_signature, "cacheHit": cache_hit}]))
+            ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-hourly", "signalFrequency": "hourly", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(hourly_ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_hourly_features), "config": json.dumps(hourly_model_kwargs), "metricSummary": hourly_ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": hourly_ga_latest_timestamp, "dataSignature": hourly_data_signature, "cacheHit": hourly_cache_hit}]))
+        except Exception as exc:
+            run_frames.append(_failed_run("crypto", "crypto-overlay", f"crypto overlay failed: {exc}", CRYPTO_MODEL_VERSION))
+
+    if market_filter in {None, "crypto"} and pipeline_filter in {None, "ml", "crypto"} and signal_frequency_filter in {None, "weekly"}:
+        try:
+            crypto_weekly_panel = _prepare_crypto_panel(signal_panel, "weekly")
+            selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp, cache_hit, data_signature = _optimize_ml_feature_subset(
+                crypto_weekly_panel,
+                "crypto",
+                "weekly",
+                evaluator_builder=lambda optimization_frame, selected, params: score_candidate_history(
+                    _walk_forward_regression(
+                        optimization_frame,
+                        selected,
+                        "target_1W",
+                        preferred_step=4,
+                        market="crypto",
+                        model_version=CRYPTO_MODEL_VERSION,
+                        signal_frequency="weekly",
+                        model_kwargs=params,
+                    ).merge(
+                        optimization_frame[["timestamp", "symbol", "target_1W"]],
+                        on=["timestamp", "symbol"],
+                        how="left",
+                    ),
+                    market="weekly",
+                    target_col="target_1W",
+                    top_n=10,
+                    feature_count=len(selected),
+                    total_features=max(len(_feature_candidates_for_market("crypto", "weekly")), 1),
+                ),
+                ga_runs=existing_ga_runs,
+                pipeline_name="ml-ga-regressor",
+                model_version=CRYPTO_MODEL_VERSION,
+                reuse_cached=reuse_cached,
+            )
+            crypto_weekly_history = _walk_forward_regression(
+                crypto_weekly_panel,
+                selected_features,
+                "target_1W",
+                preferred_step=4,
+                market="crypto",
+                model_version=CRYPTO_MODEL_VERSION,
+                signal_frequency="weekly",
+                model_kwargs=model_kwargs,
+            )
+            crypto_weekly_latest, crypto_weekly_importance, crypto_weekly_runs = _fit_crypto_latest(
+                crypto_weekly_panel, selected_features, paths, "weekly", "1W", model_kwargs
+            )
+            crypto_weekly_rankings, crypto_weekly_forecasts = _build_crypto_weekly_rankings_and_forecasts(
+                crypto_weekly_latest, memberships, crypto_weekly_importance
+            )
+            final_rankings = replace_rows_by_keys(final_rankings, crypto_weekly_rankings, ["symbol", "universe", "rebalanceFreq", "strategyMode", "signalFrequency"])
+            final_forecasts = replace_rows_by_keys(final_forecasts, crypto_weekly_forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
+            history_frames.append(crypto_weekly_history)
+            run_frames.append(pd.DataFrame(_attach_ga_summary(crypto_weekly_runs, ga_summary)))
+            ga_frames.append(pd.DataFrame([{"market": "crypto", "pipeline": "ml-ga-regressor", "signalFrequency": "weekly", "modelVersion": CRYPTO_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "dataSignature": data_signature, "cacheHit": cache_hit}]))
+        except Exception as exc:
+            run_frames.append(_failed_run("crypto", "crypto-weekly", f"crypto weekly overlay failed: {exc}", CRYPTO_MODEL_VERSION))
+
+    for index_frequency in SIGNAL_FREQUENCIES:
+        if market_filter not in {None, "index"}:
+            continue
+        if signal_frequency_filter not in {None, index_frequency}:
+            continue
+        if pipeline_filter not in {None, "ml", "index"}:
+            continue
+        try:
+            horizon_periods = _horizon_periods_for_frequency(index_frequency, "index")
+            index_panel = _prepare_index_panel(signal_panel, index_frequency)
+            selected_features, model_kwargs, ga_summary, ga_metrics, ga_latest_timestamp, cache_hit, data_signature = _optimize_ml_feature_subset(
                 index_panel,
                 "index",
-                signal_frequency,
-                evaluator_builder=lambda optimization_frame, selected, params, signal_frequency=signal_frequency: score_candidate_history(
+                index_frequency,
+                evaluator_builder=lambda optimization_frame, selected, params, signal_frequency=index_frequency: score_candidate_history(
                     _walk_forward_regression(
                         optimization_frame,
                         selected,
@@ -2036,13 +2158,13 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
                 model_version=INDEX_MODEL_VERSION,
                 reuse_cached=reuse_cached,
             )
-            index_latest, index_runs = _fit_index_latest(index_panel, paths, signal_frequency, horizon_periods, selected_features, model_kwargs)
-            index_forecasts = _build_index_forecasts(index_latest, memberships, signal_frequency, horizon_periods)
+            index_latest, index_runs = _fit_index_latest(index_panel, paths, index_frequency, horizon_periods, selected_features, model_kwargs)
+            index_forecasts = _build_index_forecasts(index_latest, memberships, index_frequency, horizon_periods)
             final_forecasts = replace_rows_by_keys(final_forecasts, index_forecasts, ["symbol", "universe", "horizon", "signalFrequency"])
             run_frames.append(pd.DataFrame(_attach_ga_summary(index_runs, ga_summary)))
-            ga_frames.append(pd.DataFrame([{"market": "index", "pipeline": "ml-ga-index", "signalFrequency": signal_frequency, "modelVersion": INDEX_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "cacheHit": False}]))
+            ga_frames.append(pd.DataFrame([{"market": "index", "pipeline": "ml-ga-index", "signalFrequency": index_frequency, "modelVersion": INDEX_MODEL_VERSION, "fitness": float(ga_metrics.get("fitness", 0.0)), "selectedFactors": json.dumps(selected_features), "config": json.dumps(model_kwargs), "metricSummary": ga_summary, "trainedAt": _now_utc().isoformat(), "latestTimestamp": ga_latest_timestamp, "dataSignature": data_signature, "cacheHit": cache_hit}]))
         except Exception as exc:
-            run_frames.append(_failed_run("index", f"index-regime-{signal_frequency}", f"index {signal_frequency} overlay failed: {exc}", INDEX_MODEL_VERSION))
+            run_frames.append(_failed_run("index", f"index-regime-{index_frequency}", f"index {index_frequency} overlay failed: {exc}", INDEX_MODEL_VERSION))
 
     history_panel = pd.concat([frame for frame in history_frames if not frame.empty], ignore_index=True) if history_frames else pd.DataFrame()
     if history_panel.empty:
@@ -2058,7 +2180,10 @@ def build_ml_overlay(paths: AppPaths, *, reuse_cached: bool = True) -> None:
     write_frame(paths, "model_run_panel", model_runs)
     ga_run_panel = pd.concat([frame for frame in ga_frames if not frame.empty], ignore_index=True) if ga_frames else pd.DataFrame()
     if not ga_run_panel.empty:
-        ga_run_panel = ga_run_panel.drop_duplicates(subset=["market", "pipeline", "signalFrequency", "modelVersion"], keep="last")
+        dedupe_keys = ["market", "pipeline", "signalFrequency", "modelVersion"]
+        if "dataSignature" in ga_run_panel.columns:
+            dedupe_keys.append("dataSignature")
+        ga_run_panel = ga_run_panel.drop_duplicates(subset=dedupe_keys, keep="last")
         write_frame(paths, "ga_run_panel", ga_run_panel)
     sync_duckdb(paths)
 
@@ -2075,5 +2200,11 @@ def bootstrap_baseline_outputs(paths: AppPaths, *, reuse_cached: bool = True) ->
     write_frame(paths, "baseline_forecast_panel", forecasts)
     write_frame(paths, "ranking_panel", rankings)
     write_frame(paths, "forecast_panel", forecasts)
-    write_frame(paths, "ga_run_panel", ga_runs)
+    ga_run_panel = pd.concat([frame for frame in [existing_ga_runs, ga_runs] if not frame.empty], ignore_index=True) if not ga_runs.empty or not existing_ga_runs.empty else pd.DataFrame()
+    if not ga_run_panel.empty:
+        dedupe_keys = ["market", "pipeline", "signalFrequency", "modelVersion"]
+        if "dataSignature" in ga_run_panel.columns:
+            dedupe_keys.append("dataSignature")
+        ga_run_panel = ga_run_panel.drop_duplicates(subset=dedupe_keys, keep="last")
+    write_frame(paths, "ga_run_panel", ga_run_panel)
     sync_duckdb(paths)

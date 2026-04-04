@@ -9,14 +9,18 @@ __pycache__
 .mypy_cache
 .venv
 venv
+.omx
 *.pyc
 *.pyo
 *.pyd
 *.log
+*.tsbuildinfo
 *.joblib
 .env
 .env.local
 .DS_Store
+*.egg-info/
+docs/superpowers/
 storage/published/*.json
 storage/exports/*
 !storage/exports/.gitkeep
@@ -25,3 +29,4 @@ storage/catalog/*
 storage/logs/*
 storage/normalized/*
 storage/raw/*
+storage/reference/publish_context.json

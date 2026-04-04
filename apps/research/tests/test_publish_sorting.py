@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from newquantmodel.config.settings import AppPaths
-from newquantmodel.publish.real_pipeline import _build_sort_lookup
+from newquantmodel.publish.real_pipeline import _build_sort_lookup, _validate_holdout_publish_gate
 
 
 class PublishSortingTest(unittest.TestCase):
@@ -113,6 +114,47 @@ class PublishSortingTest(unittest.TestCase):
             self.assertEqual(int(lookup[("crypto", "XRPUSDT")]["sortRank"]), 4)
             self.assertEqual(int(lookup[("crypto", "BNBUSDT")]["sortRank"]), 5)
             self.assertEqual(str(lookup[("crypto", "SOLUSDT")]["sortMetricLabel"]), "24h turnover rank")
+
+    def test_publish_gate_blocks_negative_holdout_fitness(self) -> None:
+        ga_runs = pd.DataFrame(
+            [
+                {
+                    "market": "index",
+                    "pipeline": "ml-ga-index",
+                    "signalFrequency": "daily",
+                    "modelVersion": "index-regime-ga-mf-v2",
+                    "dataSignature": "abc123",
+                    "metricSummary": json.dumps({"holdout": {"fitness": -0.05}}),
+                }
+            ]
+        )
+
+        previous = os.environ.get("NQM_PUBLISH_MIN_HOLDOUT_FITNESS")
+        os.environ["NQM_PUBLISH_MIN_HOLDOUT_FITNESS"] = "0.0"
+        try:
+            with self.assertRaisesRegex(ValueError, "holdout"):
+                _validate_holdout_publish_gate(ga_runs)
+        finally:
+            if previous is None:
+                os.environ.pop("NQM_PUBLISH_MIN_HOLDOUT_FITNESS", None)
+            else:
+                os.environ["NQM_PUBLISH_MIN_HOLDOUT_FITNESS"] = previous
+
+    def test_publish_gate_allows_non_negative_holdout_fitness(self) -> None:
+        ga_runs = pd.DataFrame(
+            [
+                {
+                    "market": "index",
+                    "pipeline": "ml-ga-index",
+                    "signalFrequency": "daily",
+                    "modelVersion": "index-regime-ga-mf-v2",
+                    "dataSignature": "abc123",
+                    "metricSummary": json.dumps({"holdout": {"fitness": 0.12}}),
+                }
+            ]
+        )
+
+        _validate_holdout_publish_gate(ga_runs)
 
 
 if __name__ == "__main__":

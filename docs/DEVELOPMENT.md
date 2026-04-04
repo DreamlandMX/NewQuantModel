@@ -44,6 +44,22 @@ python3 -m newquantmodel.cli.main publish-real --root .
 
 For fast verification, add `--limit 5` to the ingest commands.
 
+## Selective ML training
+
+Use the scoped ML entrypoint when you only need one market/frequency slice:
+
+```bash
+PYTHONPATH=apps/research/src:packages/shared-types/python \
+python3 -m newquantmodel.cli.main build-ml-signals --root . --market us_equity --signal-frequency daily --pipeline equity --fast
+
+PYTHONPATH=apps/research/src:packages/shared-types/python \
+python3 -m newquantmodel.cli.main build-ml-signals --root . --market index --signal-frequency weekly --pipeline index --fast
+```
+
+The GA cache now keys off a richer `dataSignature` rather than only the latest timestamp, and the stored summary includes a reserved holdout slice for quick out-of-sample inspection.
+
+`publish-real` checks the holdout fitness for signed ML GA rows before writing fresh artifacts. The default threshold is `-1.5`; use `NQM_PUBLISH_MIN_HOLDOUT_FITNESS` to tune the release threshold.
+
 ## Docker stack
 
 ```bash

@@ -67,9 +67,16 @@ def handle_build_baseline(root: str, fast: bool = False, full: bool = False) -> 
     return 0
 
 
-def handle_build_ml(root: str, fast: bool = False, full: bool = False) -> int:
+def handle_build_ml(
+    root: str,
+    fast: bool = False,
+    full: bool = False,
+    market: str | None = None,
+    signal_frequency: str | None = None,
+    pipeline: str | None = None,
+) -> int:
     paths = AppPaths.from_root(root)
-    build_ml_signals(paths, fast=fast, full=full)
+    build_ml_signals(paths, fast=fast, full=full, market=market, signal_frequency=signal_frequency, pipeline=pipeline)
     print("Built ML overlay signals")
     return 0
 
@@ -230,6 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     ml = subparsers.add_parser("build-ml-signals")
     ml.add_argument("--root", required=True)
+    ml.add_argument("--market", choices=["cn_equity", "us_equity", "crypto", "index"])
+    ml.add_argument("--signal-frequency", choices=["daily", "weekly", "hourly"])
+    ml.add_argument("--pipeline", choices=["ml", "equity", "crypto", "index"])
     _add_mode_flags(ml)
 
     backtest = subparsers.add_parser("backtest-baseline")
@@ -283,7 +293,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build-baseline-signals":
         return handle_build_baseline(args.root, getattr(args, "fast", False), getattr(args, "full", False))
     if args.command == "build-ml-signals":
-        return handle_build_ml(args.root, getattr(args, "fast", False), getattr(args, "full", False))
+        return handle_build_ml(
+            args.root,
+            getattr(args, "fast", False),
+            getattr(args, "full", False),
+            getattr(args, "market", None),
+            getattr(args, "signal_frequency", None),
+            getattr(args, "pipeline", None),
+        )
     if args.command == "backtest-baseline":
         return handle_backtest(args.root)
     if args.command == "publish-real":

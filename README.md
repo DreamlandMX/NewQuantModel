@@ -52,6 +52,19 @@ PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmod
 PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main publish-real --root .
 ```
 
+### Targeted model refresh
+
+When you only want to iterate on one slice of the model stack, you can scope ML training instead of rerunning every market:
+
+```bash
+PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main build-ml-signals --root . --market crypto --signal-frequency weekly --pipeline crypto --fast
+PYTHONPATH=apps/research/src:packages/shared-types/python python3 -m newquantmodel.cli.main build-ml-signals --root . --market index --signal-frequency daily --pipeline index --fast
+```
+
+The ML tuning path now records a `dataSignature` plus holdout metrics in `storage/normalized/ga_run_panel.parquet` so repeated runs can reuse GA results only when the underlying training slice truly matches.
+
+`publish-real` now enforces a holdout gate for signed ML GA entries. The default threshold is `-1.5`, and you can override it with `NQM_PUBLISH_MIN_HOLDOUT_FITNESS`.
+
 ### Long-running scheduler
 
 ```bash

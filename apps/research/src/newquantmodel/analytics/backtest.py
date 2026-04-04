@@ -37,6 +37,42 @@ def _safe_corr(left: pd.Series, right: pd.Series) -> float | None:
     return float(left.corr(right, method="pearson"))
 
 
+def _normalized_weights(scores: pd.Series) -> pd.Series:
+    if scores.empty:
+        return pd.Series(dtype="float64")
+    cleaned = scores.astype("float64").clip(lower=0.0)
+    if float(cleaned.sum() or 0.0) <= 0.0:
+        cleaned = pd.Series(1.0, index=scores.index, dtype="float64")
+    return cleaned / float(cleaned.sum() or 1.0)
+
+
+def _strategy_weights(day: pd.DataFrame, strategy_mode: str, top_n: int) -> dict[str, float]:
+    longs = day.head(min(top_n, len(day))).copy()
+    long_weights = _normalized_weights(longs["score"])
+    weights = {str(symbol): float(long_weights.loc[idx]) for idx, symbol in longs["symbol"].items()}
+    if strategy_mode == "long_only":
+        return weights
+    shorts = day.tail(min(top_n, len(day))).copy()
+    short_weights = _normalized_weights((-shorts["score"]).clip(lower=0.0))
+    for idx, symbol in shorts["symbol"].items():
+        weights[str(symbol)] = weights.get(str(symbol), 0.0) - float(short_weights.loc[idx])
+    return weights
+
+
+def _cost_summary(
+    *,
+    gross_returns: list[float],
+    turnover_steps: list[float],
+    periods_per_year: int,
+    cost_bps: float,
+) -> tuple[float, float, float]:
+    net_returns = pd.Series(
+        [gross - cost_bps * turnover for gross, turnover in zip(gross_returns, turnover_steps, strict=False)],
+        dtype="float64",
+    )
+    return _portfolio_metrics(net_returns, periods_per_year)
+
+
 def _resample_weekly_returns(bars_1d: pd.DataFrame) -> pd.DataFrame:
     if bars_1d.empty:
         return pd.DataFrame(columns=["market", "symbol", "timestamp", "forwardReturn"])
@@ -113,6 +149,8 @@ def build_backtests(signal_panel: pd.DataFrame, bars_1d: pd.DataFrame) -> pd.Dat
                 top_n = 10 if market == "crypto" else (30 if market == "cn_equity" else 25)
                 cost_bps = 0.0015 if market == "crypto" else 0.0010
 
+                gross_returns: list[float] = []
+                turnover_steps: list[float] = []
                 for ts in unique_dates:
                     day = market_frame[market_frame["timestamp"] == ts].sort_values("score", ascending=False).copy()
                     if day.empty:
@@ -127,31 +165,43 @@ def build_backtests(signal_panel: pd.DataFrame, bars_1d: pd.DataFrame) -> pd.Dat
                             rank_ics.append(rank_ic_value)
 
                     longs = day.head(min(top_n, len(day)))
-                    long_weights = {symbol: 1.0 / len(longs) for symbol in longs["symbol"]} if not longs.empty else {}
-                    portfolio_return = float(longs["forwardReturn"].mean()) if not longs.empty else 0.0
+                    weights = _strategy_weights(day, strategy_mode, top_n)
+                    long_weights = {key: value for key, value in weights.items() if value > 0}
+                    portfolio_return = sum(
+                        float(day.loc[day["symbol"] == symbol, "forwardReturn"].iloc[0]) * weight
+                        for symbol, weight in weights.items()
+                        if symbol in set(day["symbol"].astype(str))
+                    )
                     spread = portfolio_return
 
                     if strategy_mode == "hedged":
                         shorts = day.tail(min(top_n, len(day)))
-                        short_return = float(shorts["forwardReturn"].mean()) if not shorts.empty else 0.0
-                        portfolio_return = portfolio_return - short_return
-                        short_weights = {symbol: -1.0 / len(shorts) for symbol in shorts["symbol"]} if not shorts.empty else {}
-                        weights = {**long_weights, **short_weights}
-                        spread = float(longs["forwardReturn"].mean() - shorts["forwardReturn"].mean()) if not longs.empty and not shorts.empty else 0.0
-                    else:
-                        weights = long_weights
+                        short_weights = {key: -value for key, value in weights.items() if value < 0}
+                        short_return = sum(
+                            float(day.loc[day["symbol"] == symbol, "forwardReturn"].iloc[0]) * abs(weight)
+                            for symbol, weight in short_weights.items()
+                            if symbol in set(day["symbol"].astype(str))
+                        )
+                        spread = (
+                            sum(float(day.loc[day["symbol"] == symbol, "forwardReturn"].iloc[0]) * weight for symbol, weight in long_weights.items())
+                            - short_return
+                        )
 
                     overlap_keys = set(previous_weights) | set(weights)
                     turnover_step = sum(abs(weights.get(key, 0.0) - previous_weights.get(key, 0.0)) for key in overlap_keys) / 2.0
                     turnover += turnover_step
                     previous_weights = weights
-                    net_after_cost = portfolio_return - cost_bps * turnover_step
-                    period_returns.append(net_after_cost)
+                    gross_returns.append(float(portfolio_return))
+                    turnover_steps.append(float(turnover_step))
                     top_spreads.append(spread)
                     hit_rates.append(1.0 if portfolio_return > 0 else 0.0)
 
-                returns = pd.Series(period_returns, dtype="float64")
-                cagr, sharpe, max_drawdown = _portfolio_metrics(returns, periods_per_year)
+                cagr, sharpe, max_drawdown = _cost_summary(
+                    gross_returns=gross_returns,
+                    turnover_steps=turnover_steps,
+                    periods_per_year=periods_per_year,
+                    cost_bps=cost_bps,
+                )
                 model_version = (
                     str(market_frame["modelVersion"].mode().iloc[0])
                     if "modelVersion" in market_frame.columns and not market_frame["modelVersion"].dropna().empty
@@ -183,7 +233,27 @@ def build_backtests(signal_panel: pd.DataFrame, bars_1d: pd.DataFrame) -> pd.Dat
                         "isDerivedSignal": is_derived_signal,
                         "costStress": [
                             {"label": "base", "sharpe": sharpe, "maxDrawdown": max_drawdown, "cagr": cagr},
-                            {"label": "+10bps", "sharpe": sharpe * 0.92, "maxDrawdown": max_drawdown * 1.05, "cagr": cagr - 0.01},
+                            {
+                                "label": "+10bps",
+                                "sharpe": _cost_summary(
+                                    gross_returns=gross_returns,
+                                    turnover_steps=turnover_steps,
+                                    periods_per_year=periods_per_year,
+                                    cost_bps=cost_bps + 0.0010,
+                                )[1],
+                                "maxDrawdown": _cost_summary(
+                                    gross_returns=gross_returns,
+                                    turnover_steps=turnover_steps,
+                                    periods_per_year=periods_per_year,
+                                    cost_bps=cost_bps + 0.0010,
+                                )[2],
+                                "cagr": _cost_summary(
+                                    gross_returns=gross_returns,
+                                    turnover_steps=turnover_steps,
+                                    periods_per_year=periods_per_year,
+                                    cost_bps=cost_bps + 0.0010,
+                                )[0],
+                            },
                         ],
                     }
                 )
