@@ -39,6 +39,8 @@ type SchedulerState = {
   markets: Record<string, SchedulerMarketState>;
 };
 
+type TradePlanValidityMode = "bar_boundary";
+
 export class PublishedStore {
   constructor(
     private readonly publishedDataDir: string,
@@ -68,10 +70,39 @@ export class PublishedStore {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
+  private computeValidityWindow(item: TradePlanRecord) {
+    const validFrom = item.validFrom ?? item.publishedAt ?? item.asOfDate;
+    const validUntil = item.validUntil ?? item.nextBarAt ?? item.expiresAt;
+    const nextBarAt = item.nextBarAt ?? validUntil;
+    const validityMode: TradePlanValidityMode = item.validityMode ?? "bar_boundary";
+    return {
+      validFrom,
+      validUntil,
+      nextBarAt,
+      validityMode,
+      validFromDate: this.parseIsoTime(validFrom),
+      validUntilDate: this.parseIsoTime(validUntil)
+    };
+  }
+
+  private expiresSoonThresholdMs(item: TradePlanRecord, validFromDate: Date | null, validUntilDate: Date | null) {
+    const durationMs =
+      validFromDate && validUntilDate ? Math.max(validUntilDate.getTime() - validFromDate.getTime(), 0) : 0;
+    if (item.horizon === "1H") return Math.max(durationMs * 0.2, 10 * 60 * 1000);
+    if (item.horizon === "4H") return Math.max(durationMs * 0.2, 30 * 60 * 1000);
+    if (item.horizon === "1D") return Math.max(durationMs * 0.15, 2 * 60 * 60 * 1000);
+    if (item.horizon === "1W") return Math.max(durationMs * 0.1, 12 * 60 * 60 * 1000);
+    if (item.horizon.endsWith("W")) return Math.max(durationMs * 0.1, 12 * 60 * 60 * 1000);
+    return Math.max(durationMs * 0.15, 30 * 60 * 1000);
+  }
+
   private evaluateTradePlan(item: TradePlanRecord, evaluatedAtIso = new Date().toISOString()): TradePlanRecord {
     const evaluatedAt = this.parseIsoTime(evaluatedAtIso) ?? new Date();
-    const expiresAt = this.parseIsoTime(item.expiresAt);
-    const isExpired = expiresAt ? evaluatedAt.getTime() > expiresAt.getTime() : false;
+    const { validFrom, validUntil, nextBarAt, validityMode, validFromDate, validUntilDate } = this.computeValidityWindow(item);
+    const isExpired = validUntilDate ? evaluatedAt.getTime() >= validUntilDate.getTime() : false;
+    const expiresSoon = validUntilDate
+      ? !isExpired && validUntilDate.getTime() - evaluatedAt.getTime() <= this.expiresSoonThresholdMs(item, validFromDate, validUntilDate)
+      : false;
     const staleBlocked = Boolean(item.stale);
 
     let status: TradePlanRecord["status"] = "filtered";
@@ -115,9 +146,22 @@ export class PublishedStore {
     ) {
       runtimeFlags.push("entry_window_missed");
     }
+    const refreshDue = !isExpired && (quoteStale || runtimeFlags.includes("price_far_from_entry") || runtimeFlags.includes("entry_window_missed"));
+    if (refreshDue) {
+      runtimeFlags.push("refresh_due");
+      if (status === "actionable") {
+        status = "stale";
+        blockedReason = "snapshot_refresh_due";
+      }
+    }
 
     return {
       ...item,
+      validFrom,
+      validUntil,
+      validityMode,
+      nextBarAt,
+      expiresAt: validUntil,
       snapshotPrice,
       livePrice,
       liveUpdatedAt: liveQuote?.updatedAt ?? null,
@@ -127,6 +171,8 @@ export class PublishedStore {
       runtimeFlags,
       status,
       isExpired,
+      expiresSoon,
+      refreshDue,
       isBlocked: isExpired || staleBlocked,
       blockedReason,
       evaluatedAt: evaluatedAt.toISOString()

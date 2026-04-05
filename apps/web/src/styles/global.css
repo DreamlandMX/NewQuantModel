@@ -544,6 +544,12 @@ select {
   gap: 12px;
 }
 
+.ticket-card__status {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
 .signal-tile__header strong {
   font-size: 1.2rem;
 }
@@ -1061,6 +1067,36 @@ select {
   background: rgba(79, 195, 247, 0.12);
   border: 1px solid rgba(79, 195, 247, 0.22);
   color: var(--accent);
+}
+
+.validity-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.validity-pill--positive {
+  background: rgba(75, 194, 125, 0.1);
+  border: 1px solid rgba(75, 194, 125, 0.18);
+  color: var(--positive);
+}
+
+.validity-pill--warning {
+  background: rgba(216, 179, 107, 0.12);
+  border: 1px solid rgba(216, 179, 107, 0.22);
+  color: var(--warning);
+}
+
+.validity-pill--negative {
+  background: rgba(221, 115, 112, 0.12);
+  border: 1px solid rgba(221, 115, 112, 0.22);
+  color: var(--danger);
 }
 
 .table-row--inactive {

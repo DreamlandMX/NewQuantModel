@@ -25,7 +25,9 @@ import {
   formatTradePlanStatus,
   formatUniverseName,
   horizonSortValue,
-  humanizeToken
+  humanizeToken,
+  formatValidityState,
+  formatRelativeTime
 } from "../lib/formatters";
 
 function topBreakdownEntries(signalBreakdown: Record<string, number>) {
@@ -51,6 +53,7 @@ function PlanTicket({
   const signal = formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon);
   const liveDrift = item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2);
   const blockedReason = formatBlockedReason(item.blockedReason ?? item.rejectionReason ?? extended.forecastConflictReason);
+  const validity = formatValidityState(item);
 
   return (
     <article className={muted ? "ticket-card ticket-card--muted" : "ticket-card"}>
@@ -62,7 +65,10 @@ function PlanTicket({
           </strong>
           <span>{formatRebalance(item.rebalanceFreq)} / {signal.primary}</span>
         </div>
-        <strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong>
+        <div className="ticket-card__status">
+          <strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong>
+          <strong className={`validity-pill validity-pill--${validity.tone}`}>{validity.label}</strong>
+        </div>
       </div>
       <div className="ticket-card__grid">
         <span><strong>Entry</strong> {formatPrice(item.entryPrice)}</span>
@@ -79,6 +85,7 @@ function PlanTicket({
         <span><strong>Levels</strong> S {formatPrice(item.nearestSupport)} / R {formatPrice(item.nearestResistance)}</span>
         <span><strong>Execution</strong> {item.executionSymbol ?? humanizeToken(item.executionMode)} / {extended.priceBasis ?? "asset_spot"} / {extended.executionBasis ?? "native_market"}</span>
         <span><strong>Gate</strong> {muted ? blockedReason : formatIndicatorSummary(item.indicatorNotes)}</span>
+        <span><strong>Validity</strong> until {formatRelativeTime(item.validUntil)} / next bar {formatDualTime(item.nextBarAt).primary}</span>
       </div>
     </article>
   );

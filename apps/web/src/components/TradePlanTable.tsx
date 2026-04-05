@@ -21,6 +21,8 @@ import {
   formatSetupType,
   formatTradePlanStatus,
   formatUniverseName,
+  formatValidityState,
+  formatRelativeTime,
   humanizeToken
 } from "../lib/formatters";
 
@@ -94,6 +96,10 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
   const selectedExpiry = formatDualTime(selectedRow.expiresAt);
   const selectedUpdated = formatDualTime(selectedRow.liveUpdatedAt);
   const selectedBlockedReason = formatBlockedReason(selectedRow.blockedReason ?? selectedRow.rejectionReason);
+  const selectedValidity = formatValidityState(selectedRow);
+  const selectedValidUntil = formatDualTime(selectedRow.validUntil);
+  const selectedNextBar = formatDualTime(selectedRow.nextBarAt);
+  const selectedSnapshotAge = formatRelativeTime(selectedRow.publishedAt);
 
   return (
     <div className="trade-workbench-layout">
@@ -132,6 +138,7 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
                     const liveDisplay = row.livePrice === null ? "N/A" : formatPrice(row.livePrice);
                     const driftDisplay = row.priceDriftPct === null ? "N/A" : formatSignedPercent(row.priceDriftPct, 2);
                     const blockerTags = formatBlockedReasonTags(row.blockedReason ?? row.rejectionReason, 2);
+                    const validity = formatValidityState(row);
                     return (
                       <button
                         key={key}
@@ -159,6 +166,8 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
                         <span>{formatRatio(row.riskRewardRatio)}</span>
                         <span className="trade-master-row__status-cell">
                           <strong className={`status-pill status-pill--${row.status}`}>{formatTradePlanStatus(row.status)}</strong>
+                          <strong className={`validity-pill validity-pill--${validity.tone}`}>{validity.label}</strong>
+                          <span>{row.isExpired ? formatRelativeTime(row.validUntil) : `until ${formatRelativeTime(row.validUntil)}`}</span>
                           <ChipList items={blockerTags.map((label) => ({ label }))} />
                         </span>
                       </button>
@@ -182,6 +191,7 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
           </div>
           <div className="trade-detail-panel__status">
             <strong className={`status-pill status-pill--${selectedRow.status}`}>{formatTradePlanStatus(selectedRow.status)}</strong>
+            <strong className={`validity-pill validity-pill--${selectedValidity.tone}`}>{selectedValidity.label}</strong>
             <ChipList items={formatBlockedReasonTags(selectedRow.blockedReason ?? selectedRow.rejectionReason, 4).map((label) => ({ label }))} />
           </div>
         </div>
@@ -209,6 +219,17 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
           <DetailMetric label="Take profit" value={formatPrice(selectedRow.takeProfitPrice)} />
           <DetailMetric label="Risk reward" value={formatRatio(selectedRow.riskRewardRatio)} />
           <DetailMetric label="Expected" value={formatPercent(selectedRow.expectedReturn, 2)} />
+        </div>
+
+        <div className="trade-detail-section">
+          <h4>Validity</h4>
+          <div className="trade-detail-grid">
+            <DetailMetric label="State" value={selectedValidity.label} hint={selectedRow.validityMode === "bar_boundary" ? "Bar-boundary validity" : selectedRow.validityMode} />
+            <DetailMetric label="Valid until" value={selectedValidUntil.primary} hint={selectedValidUntil.secondary ?? selectedRow.validUntil} />
+            <DetailMetric label="Next bar" value={selectedNextBar.primary} hint={selectedNextBar.secondary ?? selectedRow.nextBarAt} />
+            <DetailMetric label="Snapshot age" value={selectedSnapshotAge} hint={formatDualTime(selectedRow.publishedAt).primary} />
+            <DetailMetric label="Live drift" value={selectedRow.priceDriftPct === null ? "N/A" : formatSignedPercent(selectedRow.priceDriftPct, 2)} hint={selectedRow.refreshDue ? "Refresh recommended before acting" : "Within current tolerance"} />
+          </div>
         </div>
 
         <div className="trade-detail-section">

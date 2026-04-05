@@ -76,6 +76,10 @@ TRADE_PLAN_COLUMNS = [
     "conflictGroupKey",
     "executionSymbol",
     "executionMode",
+    "validFrom",
+    "validUntil",
+    "validityMode",
+    "nextBarAt",
     "expiresAt",
     "modelVersion",
     "asOfDate",
@@ -301,6 +305,41 @@ def _entry_price(
     return daily_lookup.get((market, symbol)) or hourly_lookup.get((market, symbol)) or intraday_lookup.get((market, symbol))
 
 
+def _latest_bar_timestamp(
+    market: str,
+    symbol: str,
+    horizon: str,
+    bars_30m: pd.DataFrame,
+    bars_1d: pd.DataFrame,
+    bars_1h: pd.DataFrame,
+) -> pd.Timestamp:
+    def _to_utc(value: object) -> pd.Timestamp:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is None:
+            return ts.tz_localize("UTC")
+        return ts.tz_convert("UTC")
+
+    normalized = str(horizon).upper()
+    if normalized == "30M" and not bars_30m.empty:
+        scoped = bars_30m[(bars_30m["market"] == market) & (bars_30m["symbol"] == symbol)]
+        if not scoped.empty:
+            return _to_utc(scoped["timestamp"].max())
+    if normalized in {"1H", "4H"} and not bars_1h.empty:
+        scoped = bars_1h[(bars_1h["market"] == market) & (bars_1h["symbol"] == symbol)]
+        if not scoped.empty:
+            return _to_utc(scoped["timestamp"].max())
+    if normalized.endswith("W") and not bars_1d.empty:
+        weekly = _resample_weekly_bars(bars_1d)
+        scoped = weekly[(weekly["market"] == market) & (weekly["symbol"] == symbol)]
+        if not scoped.empty:
+            return _to_utc(scoped["timestamp"].max())
+    if not bars_1d.empty:
+        scoped = bars_1d[(bars_1d["market"] == market) & (bars_1d["symbol"] == symbol)]
+        if not scoped.empty:
+            return _to_utc(scoped["timestamp"].max())
+    return pd.Timestamp.utcnow().tz_localize("UTC")
+
+
 def _universe_lookup(universes: list[dict] | None) -> dict[str, dict]:
     universes = universes or []
     return {str(item.get("universe")): item for item in universes if item.get("universe")}
@@ -395,16 +434,33 @@ def _index_side_is_consistent(side: str, q10: float | None, q50: float | None, q
     return True
 
 
-def _expiry(as_of_date: object, rebalance_freq: str) -> str:
-    _ = as_of_date
-    base = pd.Timestamp.utcnow()
-    if rebalance_freq == "intraday":
-        delta = timedelta(hours=4)
-    elif rebalance_freq == "daily":
-        delta = timedelta(days=1)
+def _next_bar_boundary(base: pd.Timestamp, horizon: str) -> pd.Timestamp:
+    normalized = str(horizon).upper()
+    ts = pd.Timestamp(base)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
     else:
-        delta = timedelta(days=7)
-    return (base + delta).isoformat()
+        ts = ts.tz_convert("UTC")
+
+    if normalized == "30M":
+        floored = ts.floor("30min")
+        return floored + timedelta(minutes=30)
+    if normalized == "1H":
+        floored = ts.floor("1h")
+        return floored + timedelta(hours=1)
+    if normalized == "4H":
+        floored = ts.floor("1h")
+        bucket_hour = (floored.hour // 4) * 4
+        bucket_start = floored.replace(hour=bucket_hour, minute=0, second=0, microsecond=0)
+        return bucket_start + timedelta(hours=4)
+    if normalized == "1D":
+        floored = ts.floor("1d")
+        return floored + timedelta(days=1)
+    if normalized.endswith("W"):
+        floored = ts.floor("1d")
+        return floored + timedelta(days=7)
+    floored = ts.floor("1d")
+    return floored + timedelta(days=1)
 
 
 def _rejection_reason(reasons: list[str]) -> str | None:
@@ -738,6 +794,10 @@ def build_trade_plan_panel(
         forecast_validity = str(forecast.get("forecastValidity") or "valid")
         forecast_conflict_reason = str(forecast.get("forecastConflictReason") or "") or None
         forecast_adjusted = bool(forecast.get("forecastAdjusted", False))
+        latest_bar_at = _latest_bar_timestamp(market, symbol, str(forecast["horizon"]), bars_30m, bars_1d, bars_1h)
+        next_bar_at = _next_bar_boundary(latest_bar_at, str(forecast["horizon"]))
+        valid_from = latest_bar_at.isoformat()
+        valid_until = next_bar_at.isoformat()
 
         for context in contexts:
             strategy_mode = str(context["strategyMode"])
@@ -925,7 +985,11 @@ def build_trade_plan_panel(
                         "conflictGroupKey": f"{market}:{symbol}:{str(forecast['horizon'])}:{rebalance_freq}",
                         "executionSymbol": execution_symbol,
                         "executionMode": execution_mode,
-                        "expiresAt": _expiry(forecast.get("asOfDate"), rebalance_freq),
+                        "validFrom": valid_from,
+                        "validUntil": valid_until,
+                        "validityMode": "bar_boundary",
+                        "nextBarAt": next_bar_at.isoformat(),
+                        "expiresAt": valid_until,
                         "modelVersion": str(context["modelVersion"]),
                         "asOfDate": str(forecast["asOfDate"]),
                         "signalFrequency": signal_frequency,

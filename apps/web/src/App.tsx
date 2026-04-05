@@ -39,6 +39,13 @@ export function App() {
 
   const filteredTradePlans = useMemo(() => {
     const all = tradePlans.data?.items ?? [];
+    const urgencyOrder = (row: { isExpired?: boolean; refreshDue?: boolean; expiresSoon?: boolean; status: "actionable" | "filtered" | "expired" | "stale" }) => {
+      if (row.isExpired) return 0;
+      if (row.refreshDue) return 1;
+      if (row.expiresSoon) return 2;
+      const statusOrder = { actionable: 3, stale: 4, expired: 0, filtered: 5 } as const;
+      return statusOrder[row.status];
+    };
     return all
       .filter((row) => row.market === workbench.market)
       .filter((row) => row.rebalanceFreq === workbench.rebalanceFreq)
@@ -59,9 +66,10 @@ export function App() {
         if (leftHorizon !== rightHorizon) {
           return leftHorizon - rightHorizon;
         }
-        const statusOrder = { actionable: 0, stale: 1, expired: 2, filtered: 3 } as const;
-        if (statusOrder[left.status] !== statusOrder[right.status]) {
-          return statusOrder[left.status] - statusOrder[right.status];
+        const leftUrgency = urgencyOrder(left);
+        const rightUrgency = urgencyOrder(right);
+        if (leftUrgency !== rightUrgency) {
+          return leftUrgency - rightUrgency;
         }
         if (left.selectionRank !== right.selectionRank) {
           return left.selectionRank - right.selectionRank;

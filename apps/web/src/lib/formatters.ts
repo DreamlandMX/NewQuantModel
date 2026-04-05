@@ -137,6 +137,7 @@ export function formatBlockedReason(value: string | null | undefined) {
   const friendly: Record<string, string> = {
     expired_at_next_rebalance: "Expired at next rebalance",
     stale_market_or_universe_data: "Blocked by stale market or universe data",
+    snapshot_refresh_due: "Snapshot refresh due",
     confidence_below_55pct: "Confidence below 55%",
     trade_confidence_below_threshold: "Trade confidence below threshold",
     direction_not_bullish_enough: "Direction not bullish enough",
@@ -181,6 +182,7 @@ export function formatBlockedReasonTags(value: string | null | undefined, max = 
   const short: Record<string, string> = {
     expired_at_next_rebalance: "Expired",
     stale_market_or_universe_data: "Stale data",
+    snapshot_refresh_due: "Refresh due",
     confidence_below_55pct: "Low confidence",
     trade_confidence_below_threshold: "Low trade conf",
     direction_not_bullish_enough: "Weak long bias",
@@ -305,6 +307,44 @@ export function formatCompactPath(value: string | null | undefined) {
   const primary = parts.at(-1) ?? value;
   const secondary = parts.length > 4 ? `.../${parts.slice(-4).join("/")}` : value;
   return { primary, secondary, title: value };
+}
+
+export function formatRelativeTime(value: string | null | undefined, reference = new Date()) {
+  if (!value) {
+    return "Pending";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  const diffMs = parsed.getTime() - reference.getTime();
+  const past = diffMs < 0;
+  const absoluteMinutes = Math.round(Math.abs(diffMs) / 60000);
+  const days = Math.floor(absoluteMinutes / 1440);
+  const hours = Math.floor((absoluteMinutes % 1440) / 60);
+  const minutes = absoluteMinutes % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes || parts.length === 0) parts.push(`${minutes}m`);
+  return past ? `${parts.join(" ")} ago` : `in ${parts.join(" ")}`;
+}
+
+export function formatValidityState(item: {
+  isExpired?: boolean;
+  refreshDue?: boolean;
+  expiresSoon?: boolean;
+}) {
+  if (item.isExpired) {
+    return { label: "Expired", tone: "negative" as const };
+  }
+  if (item.refreshDue) {
+    return { label: "Refresh due", tone: "warning" as const };
+  }
+  if (item.expiresSoon) {
+    return { label: "Expires soon", tone: "warning" as const };
+  }
+  return { label: "Valid", tone: "positive" as const };
 }
 
 export function formatUniverseName(value: string | null | undefined) {

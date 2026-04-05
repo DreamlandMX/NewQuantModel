@@ -806,6 +806,173 @@ class TradePlanPanelTest(unittest.TestCase):
         self.assertFalse(bool(crypto_long["actionable"]))
         self.assertIn("non_tradable_or_missing_perpetual_proxy", str(crypto_long["rejectionReason"]))
 
+    def test_intraday_plan_uses_next_matching_bar_boundary_validity(self) -> None:
+        asset_master = pd.DataFrame(
+            [
+                {
+                    "symbol": "ETHUSDT",
+                    "name": "Ethereum",
+                    "market": "crypto",
+                    "timezone": "UTC",
+                    "isTradable": True,
+                    "hedgeProxy": "ETHUSDT perpetual",
+                    "memberships": ["crypto_top50_spot"],
+                    "riskBucket": "beta",
+                    "primaryVenue": "Binance Spot",
+                    "tradableSymbol": "ETHUSDT",
+                    "quoteAsset": "USDT",
+                    "hasPerpetualProxy": True,
+                    "historyCoverageStart": "2021-01-01",
+                }
+            ]
+        )
+        as_of = pd.Timestamp.utcnow().date().isoformat()
+        forecasts = pd.DataFrame(
+            [
+                {
+                    "symbol": "ETHUSDT",
+                    "market": "crypto",
+                    "universe": "crypto_top50_spot",
+                    "horizon": "1H",
+                    "pUp": 0.78,
+                    "expectedReturn": 0.05,
+                    "q10": -0.01,
+                    "q50": 0.02,
+                    "q90": 0.03,
+                    "alphaScore": 1.2,
+                    "confidence": 0.8,
+                    "indicatorUnavailable": False,
+                    "macdState": "bullish_cross",
+                    "rsi14": 53.0,
+                    "rsiState": "neutral",
+                    "atr14": 1.2,
+                    "atrPct": 0.01,
+                    "bbUpper": 112.0,
+                    "bbMid": 106.0,
+                    "bbLower": 100.0,
+                    "bbWidth": 0.06,
+                    "bbPosition": 0.42,
+                    "bbState": "inside_band",
+                    "kValue": 64.0,
+                    "dValue": 51.0,
+                    "jValue": 90.0,
+                    "kdjState": "above_signal",
+                    "modelVersion": "baseline-ga-mf-v2",
+                    "asOfDate": as_of,
+                    "signalFrequency": "daily",
+                    "sourceFrequency": "daily",
+                    "isDerivedSignal": False,
+                }
+            ]
+        )
+        rankings = pd.DataFrame(
+            [
+                {
+                    "symbol": "ETHUSDT",
+                    "universe": "crypto_top50_spot",
+                    "strategyMode": "long_only",
+                    "rebalanceFreq": "daily",
+                    "modelVersion": "baseline-ga-mf-v2",
+                    "rank": 1,
+                    "score": 1.5,
+                    "targetWeight": 0.12,
+                }
+            ]
+        )
+        bars_1d = pd.DataFrame(
+            [
+                {"symbol": "ETHUSDT", "market": "crypto", "timestamp": pd.Timestamp("2026-03-31T00:00:00Z"), "open": 107.0, "high": 111.0, "low": 105.0, "close": 109.0, "volume": 1000.0},
+            ]
+        )
+        bars_1h = pd.DataFrame(
+            [
+                {"symbol": "ETHUSDT", "market": "crypto", "timestamp": pd.Timestamp("2026-03-31T05:00:00Z"), "open": 107.1, "high": 111.5, "low": 105.0, "close": 108.1, "volume": 1000.0},
+                {"symbol": "ETHUSDT", "market": "crypto", "timestamp": pd.Timestamp("2026-03-31T06:00:00Z"), "open": 101.2, "high": 101.6, "low": 100.2, "close": 100.6, "volume": 1000.0},
+            ]
+        )
+
+        frame = build_trade_plan_panel(asset_master, forecasts, rankings, bars_1d, bars_1h, universes=[])
+
+        row = frame.iloc[0]
+        self.assertEqual(str(row["validityMode"]), "bar_boundary")
+        self.assertEqual(str(row["validFrom"]), "2026-03-31T06:00:00+00:00")
+        self.assertEqual(str(row["nextBarAt"]), "2026-03-31T07:00:00+00:00")
+        self.assertEqual(str(row["validUntil"]), "2026-03-31T07:00:00+00:00")
+        self.assertEqual(str(row["expiresAt"]), str(row["validUntil"]))
+        self.assertEqual(float(row["entryPrice"]), 100.6)
+
+    def test_weekly_plan_uses_next_week_boundary_validity(self) -> None:
+        asset_master = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAPL",
+                    "name": "Apple Inc.",
+                    "market": "us_equity",
+                    "timezone": "America/New_York",
+                    "isTradable": True,
+                    "hedgeProxy": "SPY / SH",
+                    "memberships": ["sp500"],
+                    "riskBucket": "mega-cap",
+                    "primaryVenue": "NASDAQ",
+                    "tradableSymbol": "AAPL",
+                    "quoteAsset": "USD",
+                    "hasPerpetualProxy": False,
+                    "historyCoverageStart": "2021-01-01",
+                }
+            ]
+        )
+        forecasts = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAPL",
+                    "market": "us_equity",
+                    "universe": "sp500",
+                    "horizon": "1W",
+                    "pUp": 0.7,
+                    "expectedReturn": 0.03,
+                    "q10": -0.01,
+                    "q50": 0.02,
+                    "q90": 0.05,
+                    "alphaScore": 0.8,
+                    "confidence": 0.8,
+                    "regime": "risk-on",
+                    "riskFlags": ["test"],
+                    "modelVersion": "equity-lgbm-ranker-v1",
+                    "asOfDate": "2026-04-03",
+                    "signalFrequency": "weekly",
+                    "sourceFrequency": "weekly",
+                    "isDerivedSignal": False,
+                }
+            ]
+        )
+        rankings = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAPL",
+                    "universe": "sp500",
+                    "strategyMode": "long_only",
+                    "rebalanceFreq": "weekly",
+                    "modelVersion": "equity-lgbm-ranker-v1",
+                    "rank": 1,
+                    "score": 1.1,
+                    "targetWeight": 0.1,
+                }
+            ]
+        )
+        bars_1d = pd.DataFrame(
+            [
+                {"symbol": "AAPL", "market": "us_equity", "timestamp": pd.Timestamp("2026-03-27T00:00:00Z"), "open": 200.0, "high": 203.0, "low": 198.0, "close": 202.0, "volume": 1000.0},
+                {"symbol": "AAPL", "market": "us_equity", "timestamp": pd.Timestamp("2026-04-03T00:00:00Z"), "open": 202.0, "high": 206.0, "low": 201.0, "close": 205.0, "volume": 1000.0},
+            ]
+        )
+
+        frame = build_trade_plan_panel(asset_master, forecasts, rankings, bars_1d, pd.DataFrame(), universes=[])
+
+        row = frame.iloc[0]
+        self.assertEqual(str(row["validityMode"]), "bar_boundary")
+        self.assertEqual(str(row["validFrom"]), "2026-04-03T00:00:00+00:00")
+        self.assertEqual(str(row["validUntil"]), "2026-04-10T00:00:00+00:00")
+
 
 if __name__ == "__main__":
     unittest.main()
