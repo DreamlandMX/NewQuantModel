@@ -24,8 +24,84 @@ import {
   formatStrategyMode,
   formatTradePlanStatus,
   formatUniverseName,
-  horizonSortValue
+  horizonSortValue,
+  humanizeToken
 } from "../lib/formatters";
+
+function topBreakdownEntries(signalBreakdown: Record<string, number>) {
+  return Object.entries(signalBreakdown)
+    .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
+    .slice(0, 6)
+    .map(([key, value]) => `${key} ${value >= 0 ? "+" : ""}${value.toFixed(2)}`);
+}
+
+function PlanTicket({
+  item,
+  muted = false
+}: {
+  item: TradePlanRecord;
+  muted?: boolean;
+}) {
+  const extended = item as TradePlanRecord & {
+    forecastConflictReason?: string | null;
+    priceBasis?: string;
+    executionBasis?: string;
+  };
+  const signal = formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon);
+  const liveDrift = item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2);
+  const blockedReason = formatBlockedReason(item.blockedReason ?? item.rejectionReason ?? extended.forecastConflictReason);
+
+  return (
+    <article className={muted ? "ticket-card ticket-card--muted" : "ticket-card"}>
+      <div className="ticket-card__header">
+        <div>
+          <strong>
+            <span className={`side-pill side-pill--${item.side}`}>{formatSide(item.side)}</span>{" "}
+            {formatHorizon(item.horizon)} / {formatUniverseName(item.universe)}
+          </strong>
+          <span>{formatRebalance(item.rebalanceFreq)} / {signal.primary}</span>
+        </div>
+        <strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong>
+      </div>
+      <div className="ticket-card__grid">
+        <span><strong>Entry</strong> {formatPrice(item.entryPrice)}</span>
+        <span><strong>Stop</strong> {formatPrice(item.stopLossPrice)}</span>
+        <span><strong>Target</strong> {formatPrice(item.takeProfitPrice)}</span>
+        <span><strong>RR</strong> {formatRatio(item.riskRewardRatio)}</span>
+        <span><strong>Live</strong> {item.livePrice === null ? "Unavailable" : formatPrice(item.livePrice)}</span>
+        <span><strong>Drift</strong> {liveDrift}</span>
+        <span><strong>Dir</strong> {formatPercent(item.directionProbability, 0)}</span>
+        <span><strong>Conf</strong> {formatPercent(item.tradeConfidence, 0)}</span>
+      </div>
+      <div className="ticket-card__notes">
+        <span><strong>Structure</strong> {formatSetupType(item.setupType)} / {formatLevelRegime(item.levelRegime)}</span>
+        <span><strong>Levels</strong> S {formatPrice(item.nearestSupport)} / R {formatPrice(item.nearestResistance)}</span>
+        <span><strong>Execution</strong> {item.executionSymbol ?? humanizeToken(item.executionMode)} / {extended.priceBasis ?? "asset_spot"} / {extended.executionBasis ?? "native_market"}</span>
+        <span><strong>Gate</strong> {muted ? blockedReason : formatIndicatorSummary(item.indicatorNotes)}</span>
+      </div>
+    </article>
+  );
+}
+
+function TechnicalIndicatorCard({ item }: { item: ForecastRecord }) {
+  return (
+    <article className="indicator-card">
+      <div className="indicator-card__header">
+        <strong>{item.horizon}</strong>
+        <span>{item.regime}</span>
+      </div>
+      <div className="indicator-card__rows">
+        <span><strong>MACD</strong> {item.macdHist.toFixed(4)} / {item.macdState}</span>
+        <span><strong>RSI</strong> {item.rsi14.toFixed(1)} / {item.rsiState}</span>
+        <span><strong>ATR</strong> {formatPrice(item.atr14)} / {formatPercent(item.atrPct, 2)}</span>
+        <span><strong>BB</strong> {formatPrice(item.bbLower)} / {formatPrice(item.bbMid)} / {formatPrice(item.bbUpper)}</span>
+        <span><strong>KDJ</strong> {item.kValue.toFixed(1)} / {item.dValue.toFixed(1)} / {item.jValue.toFixed(1)}</span>
+        <span><strong>State</strong> {item.bbState} / {item.kdjState}</span>
+      </div>
+    </article>
+  );
+}
 
 export function AssetDetailPage({
   asset,
@@ -91,11 +167,11 @@ export function AssetDetailPage({
     <Panel title="Asset Detail" eyebrow="Prediction + risk context">
       {asset ? (
         <div className="value-grid value-grid--details">
-          <ValueBlock label="Live Price" primary={liveQuote ? formatPrice(liveQuote.lastPrice) : "Live quote unavailable"} secondary={liveQuote ? `${liveQuote.isStale ? "stale" : "live"} / ${liveUpdated.primary}` : "Crypto realtime overlay only"} title={liveUpdated.title} />
-          <ValueBlock label="Snapshot Price" primary={primaryPlan ? formatPrice(primaryPlan.snapshotPrice) : "N/A"} secondary={primaryPlan ? `Published ${publishedTime.primary}` : "No trade plan selected"} />
-          <ValueBlock label="Drift vs Snapshot" primary={snapshotDrift === null ? "N/A" : formatSignedPercent(snapshotDrift, 2)} secondary={primaryPlan && liveQuote ? `Source ${liveQuote.source}` : "Waiting for live quote"} />
-          <ValueBlock label="Symbol" primary={asset.symbol} secondary={asset.name} />
-          <ValueBlock label="Memberships" primary={asset.memberships.map(formatUniverseName).join(", ")} secondary={asset.memberships.join(", ")} title={asset.memberships.join(", ")} />
+          <ValueBlock label="Live Price" primary={liveQuote ? formatPrice(liveQuote.lastPrice) : "Live quote unavailable"} secondary={liveQuote ? `${liveQuote.isStale ? "stale" : "live"} / ${liveUpdated.primary}` : "Crypto realtime overlay only"} title={liveUpdated.title} className="value-block--quote" tone={liveQuote && !liveQuote.isStale ? "accent" : "muted"} />
+          <ValueBlock label="Snapshot Price" primary={primaryPlan ? formatPrice(primaryPlan.snapshotPrice) : "N/A"} secondary={primaryPlan ? `Published ${publishedTime.primary}` : "No trade plan selected"} className="value-block--quote" />
+          <ValueBlock label="Drift vs Snapshot" primary={snapshotDrift === null ? "N/A" : formatSignedPercent(snapshotDrift, 2)} secondary={primaryPlan && liveQuote ? `Source ${liveQuote.source}` : "Waiting for live quote"} tone={snapshotDrift !== null && snapshotDrift < 0 ? "negative" : snapshotDrift !== null && snapshotDrift > 0 ? "positive" : "neutral"} className="value-block--quote" />
+          <ValueBlock label="Symbol" primary={asset.symbol} secondary={asset.name} className="value-block--meta" />
+          <ValueBlock label="Memberships" primary={asset.memberships.map(formatUniverseName).join(", ")} secondary={asset.memberships.join(", ")} title={asset.memberships.join(", ")} className="value-block--meta" />
           <ValueBlock label="Hedge Proxy" primary={asset.hedgeProxy ?? "None"} />
           <ValueBlock label="Primary Venue" primary={asset.primaryVenue} />
           <ValueBlock label="Tradable Symbol" primary={asset.tradableSymbol ?? "Research only"} />
@@ -115,94 +191,14 @@ export function AssetDetailPage({
       )}
       {asset ? (
         <div className="jobs-list">
-          {intradayActionablePlans.length ? <span className="detail-label">Intraday Plans</span> : null}
-          {intradayActionablePlans.map((item) => (
-            <article className="job-row trade-plan-card" key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`}>
-              <strong>
-                <span className={`side-pill side-pill--${item.side}`}>{formatSide(item.side)}</span>{" "}
-                {formatHorizon(item.horizon)} / {formatUniverseName(item.universe)}
-              </strong>
-              <span><strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong></span>
-              <span>{formatSetupType(item.setupType)} / {formatLevelRegime(item.levelRegime)}</span>
-              <span>Entry {formatPrice(item.entryPrice)} / SL {formatPrice(item.stopLossPrice)} / TP {formatPrice(item.takeProfitPrice)} / RR {formatRatio(item.riskRewardRatio)}</span>
-              <span>
-                Live {item.livePrice === null ? "unavailable" : formatPrice(item.livePrice)} / Snapshot {formatPrice(item.snapshotPrice)} / Drift {item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2)}
-              </span>
-              <span>S {formatPrice(item.nearestSupport)} / R {formatPrice(item.nearestResistance)} / {formatPercent(item.supportDistancePct, 1)} to support / {formatPercent(item.resistanceDistancePct, 1)} to resistance</span>
-              <span>{formatPercent(item.expectedReturn, 2)} expected / {formatPercent(item.directionProbability, 0)} direction probability / {formatPercent(item.tradeConfidence, 0)} trade confidence</span>
-              <span>{formatPercent(item.indicatorAlignmentScore, 0)} indicator alignment / {formatIndicatorSummary(item.indicatorNotes)}</span>
-              <span>
-                {item.executionSymbol ? `Execution ${item.executionSymbol}` : "No execution symbol"} / {((item as TradePlanRecord & { priceBasis?: string }).priceBasis ?? "asset_spot")} price / {((item as TradePlanRecord & { executionBasis?: string }).executionBasis ?? "native_market")} execution / {formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon).primary} / {item.entrySource} entry / {item.stopSource} stop / {item.targetSource} target / expires {formatDualTime(item.expiresAt).primary}
-              </span>
-              <span>
-                {item.livePrice === null
-                  ? "Live quote unavailable"
-                  : `Distance to entry ${formatSignedPercent((item.livePrice - item.entryPrice) / item.entryPrice, 2)} / stop ${formatSignedPercent((item.livePrice - item.stopLossPrice) / item.stopLossPrice, 2)} / target ${formatSignedPercent((item.livePrice - item.takeProfitPrice) / item.takeProfitPrice, 2)}`}
-              </span>
-            </article>
-          ))}
-          {dailyWeeklyActionablePlans.length ? <span className="detail-label">Daily / Weekly Plans</span> : null}
-          {dailyWeeklyActionablePlans.map((item) => (
-            <article className="job-row trade-plan-card" key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`}>
-              <strong>
-                <span className={`side-pill side-pill--${item.side}`}>{formatSide(item.side)}</span>{" "}
-                {formatHorizon(item.horizon)} / {formatRebalance(item.rebalanceFreq)} / {formatUniverseName(item.universe)}
-              </strong>
-              <span><strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong></span>
-              <span>{formatSetupType(item.setupType)} / {formatLevelRegime(item.levelRegime)}</span>
-              <span>Entry {formatPrice(item.entryPrice)} / SL {formatPrice(item.stopLossPrice)} / TP {formatPrice(item.takeProfitPrice)} / RR {formatRatio(item.riskRewardRatio)}</span>
-              <span>
-                Live {item.livePrice === null ? "unavailable" : formatPrice(item.livePrice)} / Snapshot {formatPrice(item.snapshotPrice)} / Drift {item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2)}
-              </span>
-              <span>S {formatPrice(item.nearestSupport)} / R {formatPrice(item.nearestResistance)} / {formatPercent(item.supportDistancePct, 1)} to support / {formatPercent(item.resistanceDistancePct, 1)} to resistance</span>
-              <span>{formatPercent(item.expectedReturn, 2)} expected / {formatPercent(item.directionProbability, 0)} direction probability / {formatPercent(item.tradeConfidence, 0)} trade confidence</span>
-              <span>{formatPercent(item.indicatorAlignmentScore, 0)} indicator alignment / {formatIndicatorSummary(item.indicatorNotes)}</span>
-              <span>
-                {item.executionSymbol ? `Execution ${item.executionSymbol}` : "No execution symbol"} / {((item as TradePlanRecord & { priceBasis?: string }).priceBasis ?? "asset_spot")} price / {((item as TradePlanRecord & { executionBasis?: string }).executionBasis ?? "native_market")} execution / {formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon).primary} / {item.entrySource} entry / {item.stopSource} stop / {item.targetSource} target / expires {formatDualTime(item.expiresAt).primary}
-              </span>
-            </article>
-          ))}
-          {intradayInactivePlans.length ? <span className="detail-label">Inactive Intraday Plans</span> : null}
-          {intradayInactivePlans.map((item) => (
-            <article className="job-row trade-plan-card trade-plan-card--muted" key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`}>
-              <strong>
-                <span className={`side-pill side-pill--${item.side}`}>{formatSide(item.side)}</span>{" "}
-                {formatHorizon(item.horizon)} / {formatRebalance(item.rebalanceFreq)} / {formatUniverseName(item.universe)}
-              </strong>
-              <span><strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong></span>
-              <span>{formatSetupType(item.setupType)} / {formatLevelRegime(item.levelRegime)}</span>
-              <span>Entry {formatPrice(item.entryPrice)} / SL {formatPrice(item.stopLossPrice)} / TP {formatPrice(item.takeProfitPrice)} / RR {formatRatio(item.riskRewardRatio)}</span>
-              <span>
-                Live {item.livePrice === null ? "unavailable" : formatPrice(item.livePrice)} / Snapshot {formatPrice(item.snapshotPrice)} / Drift {item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2)}
-              </span>
-              <span>{formatBlockedReason(item.blockedReason ?? item.rejectionReason ?? ((item as TradePlanRecord & { forecastConflictReason?: string | null }).forecastConflictReason))} / {formatPercent(item.directionProbability, 0)} direction probability / {formatPercent(item.tradeConfidence, 0)} trade confidence</span>
-              <span>{formatPercent(item.indicatorAlignmentScore, 0)} indicator alignment / {formatIndicatorSummary(item.indicatorNotes)}</span>
-              <span>
-                {item.selectionRank === 1 ? "Primary candidate" : `Conflict rank ${item.selectionRank}`} / {((item as TradePlanRecord & { priceBasis?: string }).priceBasis ?? "asset_spot")} price / {((item as TradePlanRecord & { executionBasis?: string }).executionBasis ?? "native_market")} execution / {formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon).primary}
-              </span>
-            </article>
-          ))}
-          {dailyWeeklyInactivePlans.length ? <span className="detail-label">Inactive Daily / Weekly Plans</span> : null}
-          {dailyWeeklyInactivePlans.map((item) => (
-            <article className="job-row trade-plan-card trade-plan-card--muted" key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`}>
-              <strong>
-                <span className={`side-pill side-pill--${item.side}`}>{formatSide(item.side)}</span>{" "}
-                {formatHorizon(item.horizon)} / {formatUniverseName(item.universe)}
-              </strong>
-              <span><strong className={`status-pill status-pill--${item.status}`}>{formatTradePlanStatus(item.status)}</strong></span>
-              <span>{formatSetupType(item.setupType)} / {formatLevelRegime(item.levelRegime)}</span>
-              <span>Entry {formatPrice(item.entryPrice)} / SL {formatPrice(item.stopLossPrice)} / TP {formatPrice(item.takeProfitPrice)} / RR {formatRatio(item.riskRewardRatio)}</span>
-              <span>
-                Live {item.livePrice === null ? "unavailable" : formatPrice(item.livePrice)} / Snapshot {formatPrice(item.snapshotPrice)} / Drift {item.priceDriftPct === null ? "N/A" : formatSignedPercent(item.priceDriftPct, 2)}
-              </span>
-              <span>S {formatPrice(item.nearestSupport)} / R {formatPrice(item.nearestResistance)} / {formatPercent(item.supportDistancePct, 1)} to support / {formatPercent(item.resistanceDistancePct, 1)} to resistance</span>
-              <span>{formatBlockedReason(item.blockedReason ?? item.rejectionReason ?? ((item as TradePlanRecord & { forecastConflictReason?: string | null }).forecastConflictReason))} / {formatPercent(item.directionProbability, 0)} direction probability / {formatPercent(item.tradeConfidence, 0)} trade confidence</span>
-              <span>{formatPercent(item.indicatorAlignmentScore, 0)} indicator alignment / {formatIndicatorSummary(item.indicatorNotes)}</span>
-              <span>
-                {item.selectionRank === 1 ? "Primary candidate" : `Conflict rank ${item.selectionRank}`} / {((item as TradePlanRecord & { priceBasis?: string }).priceBasis ?? "asset_spot")} price / {((item as TradePlanRecord & { executionBasis?: string }).executionBasis ?? "native_market")} execution / {formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal, item.horizon).primary} / {item.entrySource} entry / {item.stopSource} stop / {item.targetSource} target / expires {formatDualTime(item.expiresAt).primary}
-              </span>
-            </article>
-          ))}
+          {intradayActionablePlans.length ? <span className="detail-label detail-label--terminal">Intraday Plans</span> : null}
+          {intradayActionablePlans.map((item) => <PlanTicket item={item} key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`} />)}
+          {dailyWeeklyActionablePlans.length ? <span className="detail-label detail-label--terminal">Daily / Weekly Plans</span> : null}
+          {dailyWeeklyActionablePlans.map((item) => <PlanTicket item={item} key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`} />)}
+          {intradayInactivePlans.length ? <span className="detail-label detail-label--terminal">Inactive Intraday Plans</span> : null}
+          {intradayInactivePlans.map((item) => <PlanTicket item={item} muted key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`} />)}
+          {dailyWeeklyInactivePlans.length ? <span className="detail-label detail-label--terminal">Inactive Daily / Weekly Plans</span> : null}
+          {dailyWeeklyInactivePlans.map((item) => <PlanTicket item={item} muted key={`${item.symbol}-${item.universe}-${item.strategyMode}-${item.rebalanceFreq}-${item.horizon}-${item.side}`} />)}
           {asset.market === "index" && primaryPlanExtended ? <span className="detail-label">Index Model Diagnostics</span> : null}
           {asset.market === "index" && primaryPlanExtended ? (
             <div className="value-grid value-grid--status">
@@ -222,15 +218,12 @@ export function AssetDetailPage({
               <ValueBlock label="Plan Sources" primary={`${primaryPlan.entrySource} / ${primaryPlan.stopSource} / ${primaryPlan.targetSource}`} secondary="entry / stop / target provenance" />
             </div>
           ) : null}
-          {sortedForecasts.length ? <span className="detail-label">Technical Indicators</span> : null}
-          {sortedForecasts.map((item) => (
-            <article className="job-row" key={`${item.symbol}-${item.universe}-${item.horizon}-technicals`}>
-              <strong>{item.horizon} / Technical Indicators</strong>
-              <span>MACD {item.macdHist.toFixed(4)} / {item.macdState} | RSI {item.rsi14.toFixed(1)} / {item.rsiState}</span>
-              <span>ATR {formatPrice(item.atr14)} / {formatPercent(item.atrPct, 2)} | BB {formatPrice(item.bbLower)} / {formatPrice(item.bbMid)} / {formatPrice(item.bbUpper)}</span>
-              <span>BB width {formatPercent(item.bbWidth, 2)} / position {(item.bbPosition * 100).toFixed(0)}% / {item.bbState} | KDJ {item.kValue.toFixed(1)} / {item.dValue.toFixed(1)} / {item.jValue.toFixed(1)} / {item.kdjState}</span>
-            </article>
-          ))}
+          {sortedForecasts.length ? <span className="detail-label detail-label--terminal">Technical Indicators</span> : null}
+          <div className="indicator-grid">
+            {sortedForecasts.map((item) => (
+              <TechnicalIndicatorCard item={item} key={`${item.symbol}-${item.universe}-${item.horizon}-technicals`} />
+            ))}
+          </div>
           {(actionablePlans.length || inactivePlans.length) && <span className="detail-label">Forecasts</span>}
           {sortedForecasts.map((item) => (
             <article className="job-row" key={`${item.symbol}-${item.universe}-${item.horizon}`}>
@@ -247,12 +240,7 @@ export function AssetDetailPage({
               <strong>{formatUniverseName(item.universe)} / {formatStrategyMode(item.strategyMode)} / {formatRebalance(item.rebalanceFreq)}</strong>
               <span>score {item.score.toFixed(3)} / target {formatPercent(item.targetWeight, 2)}</span>
               <span>{formatModelVersion(item.modelVersion).primary} / {formatSignalProvenance(item.signalFrequency, item.sourceFrequency, item.isDerivedSignal).primary}</span>
-              <span>
-                {Object.entries(item.signalBreakdown)
-                  .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
-                  .map(([key, value]) => `${key}:${value.toFixed(2)}`)
-                  .join(" | ")}
-              </span>
+              <span>{topBreakdownEntries(item.signalBreakdown).join(" / ")}</span>
             </article>
           ))}
         </div>

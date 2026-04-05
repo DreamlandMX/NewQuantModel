@@ -4,6 +4,7 @@ import type { TradePlanRecord } from "@newquantmodel/shared-types";
 
 import {
   formatBlockedReason,
+  formatBlockedReasonTags,
   formatDualTime,
   formatHorizon,
   formatIndicatorSummary,
@@ -130,6 +131,7 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
                     const key = tradePlanKey(row);
                     const liveDisplay = row.livePrice === null ? "N/A" : formatPrice(row.livePrice);
                     const driftDisplay = row.priceDriftPct === null ? "N/A" : formatSignedPercent(row.priceDriftPct, 2);
+                    const blockerTags = formatBlockedReasonTags(row.blockedReason ?? row.rejectionReason, 2);
                     return (
                       <button
                         key={key}
@@ -157,7 +159,7 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
                         <span>{formatRatio(row.riskRewardRatio)}</span>
                         <span className="trade-master-row__status-cell">
                           <strong className={`status-pill status-pill--${row.status}`}>{formatTradePlanStatus(row.status)}</strong>
-                          <span>{formatBlockedReason(row.blockedReason ?? row.rejectionReason)}</span>
+                          <ChipList items={blockerTags.map((label) => ({ label }))} />
                         </span>
                       </button>
                     );
@@ -180,7 +182,7 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
           </div>
           <div className="trade-detail-panel__status">
             <strong className={`status-pill status-pill--${selectedRow.status}`}>{formatTradePlanStatus(selectedRow.status)}</strong>
-            <span>{selectedBlockedReason}</span>
+            <ChipList items={formatBlockedReasonTags(selectedRow.blockedReason ?? selectedRow.rejectionReason, 4).map((label) => ({ label }))} />
           </div>
         </div>
 
@@ -267,6 +269,11 @@ export function TradePlanTable({ rows, selectedTradePlanKey, onSelectTradePlan }
             <DetailMetric label="Model" value={selectedModel.primary} hint={selectedModel.secondary ?? selectedRow.modelVersion} />
             <DetailMetric label="Conflict / block" value={selectedBlockedReason} hint={selectedPlanExtended.forecastConflictReason ?? null} />
           </div>
+        </div>
+
+        <div className="trade-detail-section">
+          <h4>Blockers</h4>
+          <ChipList items={formatBlockedReasonTags(selectedRow.blockedReason ?? selectedRow.rejectionReason, 6).map((label) => ({ label }))} />
         </div>
 
         <div className="trade-detail-section">

@@ -741,7 +741,7 @@ def build_trade_plan_panel(
 
         for context in contexts:
             strategy_mode = str(context["strategyMode"])
-            rebalance_freq = str(context["rebalanceFreq"])
+            rebalance_freq = "intraday" if _is_crypto_intraday_horizon(market, str(forecast["horizon"])) else str(context["rebalanceFreq"])
             rank_score = _safe_float(context.get("score")) or 0.0
             target_weight = _safe_float(context.get("targetWeight")) or 0.0
             candidate_sides = ["long"] if strategy_mode == "long_only" else ["long", "short"]
@@ -852,7 +852,7 @@ def build_trade_plan_panel(
                     stop_source=stop_source,
                     target_source=target_source,
                 ):
-                    continue
+                    reasons.append("no_valid_sr_setup")
                 if side == "long":
                     risk_pct = max((entry_price - stop_loss_price) / max(entry_price, 1e-6), 0.0)
                     reward_pct = max((take_profit_price - entry_price) / max(entry_price, 1e-6), 0.0)

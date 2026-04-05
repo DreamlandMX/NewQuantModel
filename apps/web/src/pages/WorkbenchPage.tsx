@@ -39,6 +39,9 @@ export function WorkbenchPage({
 }) {
   const liveConnected = liveQuotes.some((item) => item.market === market && !item.isStale);
   const [selectedTradePlanKey, setSelectedTradePlanKey] = useState<string | null>(null);
+  const actionableCount = rows.filter((row) => row.status === "actionable").length;
+  const filteredCount = rows.filter((row) => row.status === "filtered").length;
+  const staleCount = rows.filter((row) => row.status === "stale").length;
   const liveFeedLabel =
     market === "crypto"
       ? `Live quote feed: ${liveConnected ? "connected" : "stale or unavailable"}.`
@@ -61,7 +64,7 @@ export function WorkbenchPage({
 
   return (
     <Panel title="Universe Workbench" eyebrow="Actionable trade plans">
-      <div className="toolbar">
+      <div className="toolbar toolbar--terminal">
         <label>
           Market
           <select value={market} onChange={(event) => onMarketChange(event.target.value)}>
@@ -94,6 +97,11 @@ export function WorkbenchPage({
           </select>
         </label>
       </div>
+      <div className="workbench-summary">
+        <ValueBlock label="Market" primary={formatMarketName(market)} secondary={rebalanceFreq === "intraday" ? "30m / 1H / 4H ladder" : `${rebalanceFreq} execution lane`} tone="accent" />
+        <ValueBlock label="Visible Rows" primary={String(rows.length)} secondary={`${actionableCount} actionable / ${filteredCount} filtered`} tone="neutral" />
+        <ValueBlock label="Status Risk" primary={staleCount > 0 ? `${staleCount} stale` : "Clean"} secondary={liveConnected ? "Live overlay connected" : "Overlay delayed"} tone={staleCount > 0 ? "negative" : "positive"} />
+      </div>
       {selectedUniverse ? (
         <div className="value-grid value-grid--status">
           <ValueBlock
@@ -103,11 +111,12 @@ export function WorkbenchPage({
             secondary={`${formatMarketName(selectedUniverse.market)} / ${formatCoverageMode(selectedUniverse.coverageMode)} / ${selectedUniverse.coveragePct.toFixed(1)}%`}
             tertiary={`Refresh ${selectedUniverse.refreshSchedule} / stale: ${String(selectedUniverse.stale)}`}
             title={selectedUniverse.universe}
+            className="value-block--meta"
           />
         </div>
       ) : null}
-      <div className="detail-label">
-        Quick scan on the left, full diagnostics on the right. {rebalanceFreq === "intraday" ? "Intraday mode shows 30m, 1H, and 4H plans." : "Longer-horizon mode shows daily and weekly plans."} {market === "crypto" ? "Crypto rows overlay live exchange quotes on top of the published snapshot." : market === "index" ? "Index rows overlay live index points on top of the published snapshot while ETF or futures proxies remain execution references only." : ""} {liveFeedLabel}
+      <div className="detail-label detail-label--terminal">
+        Left pane is the execution blotter, right pane is the selected setup ticket. {rebalanceFreq === "intraday" ? "Intraday mode prioritizes short-horizon laddering and drift checks." : "Longer-horizon mode emphasizes publish geometry, blockers, and expiry."} {market === "crypto" ? "Crypto rows show exchange-linked live drift against the published snapshot." : market === "index" ? "Index rows show live spot overlays while execution remains proxy-based." : ""} {liveFeedLabel}
       </div>
       <TradePlanTable rows={sortedRows} selectedTradePlanKey={selectedTradePlanKey} onSelectTradePlan={setSelectedTradePlanKey} />
     </Panel>

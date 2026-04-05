@@ -1,4 +1,4 @@
-const LOCAL_DATE_TIME = new Intl.DateTimeFormat(undefined, {
+const LOCAL_DATE_TIME = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "2-digit",
@@ -19,7 +19,7 @@ const UTC_DATE_TIME = new Intl.DateTimeFormat("en-US", {
   timeZoneName: "short"
 });
 
-const DATE_ONLY = new Intl.DateTimeFormat(undefined, {
+const DATE_ONLY = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "2-digit"
@@ -172,6 +172,48 @@ export function formatBlockedReason(value: string | null | undefined) {
     .split(",")
     .map((part) => friendly[part.trim()] ?? humanizeToken(part.trim()))
     .join(" | ");
+}
+
+export function formatBlockedReasonTags(value: string | null | undefined, max = 3) {
+  if (!value) {
+    return ["Pass"];
+  }
+  const short: Record<string, string> = {
+    expired_at_next_rebalance: "Expired",
+    stale_market_or_universe_data: "Stale data",
+    confidence_below_55pct: "Low confidence",
+    trade_confidence_below_threshold: "Low trade conf",
+    direction_not_bullish_enough: "Weak long bias",
+    direction_not_bearish_enough: "Weak short bias",
+    risk_reward_below_1_5x: "Low RR",
+    missing_quantile_forecast: "Missing quantiles",
+    invalid_long_quantile_geometry: "Long geometry",
+    invalid_short_quantile_geometry: "Short geometry",
+    invalid_long_trade_geometry: "Invalid long",
+    invalid_short_trade_geometry: "Invalid short",
+    forecast_conflict: "Forecast conflict",
+    direction_quantile_mismatch: "Dir mismatch",
+    zero_risk_distance: "Zero risk",
+    non_tradable_or_missing_perpetual_proxy: "No perp proxy",
+    cn_equity_short_disabled: "CN short off",
+    non_tradable_cash_equity: "No cash execution",
+    missing_execution_symbol: "No execution symbol",
+    missing_inverse_proxy: "No inverse proxy",
+    missing_long_proxy: "No long proxy",
+    missing_entry_reference_price: "Missing price",
+    lost_conflict_resolution: "Conflict loser",
+    indicator_alignment_below_threshold: "Low alignment",
+    no_valid_sr_setup: "No S/R",
+    strong_resistance_overhead: "Resistance overhead",
+    strong_support_below: "Support below"
+  };
+
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => short[part] ?? humanizeToken(part))
+    .slice(0, max);
 }
 
 export function formatSide(value: string | null | undefined) {

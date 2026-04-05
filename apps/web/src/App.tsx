@@ -174,7 +174,11 @@ export function App() {
         <div className="brand-block">
           <span className="brand-block__eyebrow">Research terminal</span>
           <h1>newquantmodel</h1>
-          <p>Batch-published forecasts, rankings, backtests, and research exports.</p>
+          <p>Institutional research console for published signals, trade plans, live overlays, and risk diagnostics.</p>
+          <div className="brand-block__meta">
+            <span>Multi-asset research</span>
+            <span>Published snapshot + live tape</span>
+          </div>
         </div>
         <nav className="nav-list">
           {([
@@ -192,19 +196,19 @@ export function App() {
         </nav>
       </aside>
       <section className="content-shell">
-        <header className="content-header">
-          <div className="header-meta">
-            <span className="detail-label">Environment</span>
+        <header className="content-header content-header--terminal">
+          <div className="header-meta header-meta--environment">
+            <span className="detail-label">System</span>
             <strong>Windows + WSL</strong>
-            <span>Local-first / English UI</span>
+            <span>Local-first runtime / English terminal UI</span>
           </div>
-          <div className="header-meta" title={report.data?.pdfPath ?? undefined}>
-            <span className="detail-label">Exports</span>
-            <strong>Markdown, CSV, PDF weekly report</strong>
+          <div className="header-meta header-meta--exports" title={report.data?.pdfPath ?? undefined}>
+            <span className="detail-label">Research Pack</span>
+            <strong>Weekly report bundle</strong>
             <span>{exportPath.secondary ?? exportPath.primary}</span>
           </div>
-          <div className="header-meta" title={publishedTime.title}>
-            <span className="detail-label">Status</span>
+          <div className="header-meta header-meta--status" title={publishedTime.title}>
+            <span className="detail-label">Snapshot</span>
             <strong>{publishedTime.primary}</strong>
             <span>{publishedTime.secondary ?? "Awaiting first publish"}</span>
           </div>

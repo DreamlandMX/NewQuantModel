@@ -87,43 +87,55 @@ export function OverviewPage({
   return (
     <div className="page-grid">
       <Panel title="Platform State" eyebrow="Overview">
-        <div className="metric-grid metric-grid--overview">
-          <MetricCard label="Published Snapshot" value={publishedTime.primary} secondary={publishedTime.secondary} title={publishedTime.title} wide />
-          <MetricCard label="Universes" value={String(universes.length)} />
-          <MetricCard label="Forecast Rows" value={String(forecasts.length)} />
-          <MetricCard label="Coverage Mode" value="Batch Published" hint="TS online, Python offline" />
-          <MetricCard label="Average Coverage" value={averageCoverage} />
-          <MetricCard label="Tradable Coverage" value={tradableCoverage} />
-          <MetricCard label="Actionable Plans" value={String(actionablePlans)} />
-          <MetricCard label="Expired Plans" value={String(expiredPlans)} />
-          <MetricCard label="Stale Markets" value={String(staleMarkets)} />
-          <MetricCard
-            label="Worker"
-            value={scheduler?.workerStatus === "running" ? "Auto-refresh on" : "Worker stopped"}
-            secondary={workerHeartbeat.primary}
-            hint={scheduler?.lastError ?? `Polling every ${scheduler?.pollSeconds ?? 60}s`}
-          />
-          <MetricCard
-            label="Crypto Live Quotes"
-            value={liveConnected ? "Connected" : "Stale"}
-            secondary={topLiveQuotes.length ? `${topLiveQuotes.length} tracked leaders` : "No live quotes yet"}
-            hint="Realtime exchange overlay"
-          />
-          <MetricCard
-            label="Index Live Quotes"
-            value={indexLiveConnected ? "Connected" : "Stale"}
-            secondary={topIndexQuotes.length ? `${topIndexQuotes.length} tracked benchmarks` : "No live quotes yet"}
-            hint="Realtime index point overlay"
-          />
-          <article className="metric-card metric-card--wide">
-            <span className="metric-card__label">Model Stack</span>
+        <div className="overview-brief">
+          <div className="overview-brief__hero">
+            <span className="overview-brief__eyebrow">Market brief</span>
+            <h3>{publishedTime.primary}</h3>
+            <p>{publishedTime.secondary ?? "Awaiting first publish"}</p>
+            <div className="overview-brief__meta">
+              <span>Batch-published research snapshot</span>
+              <span>{reportPathDisplay.primary}</span>
+            </div>
+          </div>
+          <div className="overview-kpi-grid">
+            <MetricCard label="Universes" value={String(universes.length)} compact />
+            <MetricCard label="Forecast Rows" value={String(forecasts.length)} compact />
+            <MetricCard label="Actionable Plans" value={String(actionablePlans)} tone={actionablePlans > 0 ? "positive" : "neutral"} compact />
+            <MetricCard label="Stale Markets" value={String(staleMarkets)} tone={staleMarkets > 0 ? "negative" : "positive"} compact />
+            <MetricCard label="Coverage" value={averageCoverage} secondary={`Tradable ${tradableCoverage}`} compact />
+            <MetricCard label="Worker" value={scheduler?.workerStatus === "running" ? "Running" : "Stopped"} secondary={workerHeartbeat.primary} tone={scheduler?.workerStatus === "running" ? "positive" : "negative"} compact />
+          </div>
+        </div>
+        <div className="overview-subgrid">
+          <article className="market-module">
+            <div className="market-module__header">
+              <div>
+                <span className="panel__eyebrow">Model stack</span>
+                <h3>Published model lane</h3>
+              </div>
+              <strong>Batch Published</strong>
+            </div>
             <ChipList items={modelChips.length > 0 ? modelChips : [{ label: "Baseline Signals" }]} />
-            <span className="metric-card__hint">Latest published versions</span>
+            <p className="market-module__note">Production snapshot versions currently visible to the API and terminal.</p>
+          </article>
+          <article className="market-module">
+            <div className="market-module__header">
+              <div>
+                <span className="panel__eyebrow">Execution state</span>
+                <h3>System readiness</h3>
+              </div>
+              <strong className={liveConnected ? "text-positive" : "text-warning"}>{liveConnected ? "Live linked" : "Delayed"}</strong>
+            </div>
+            <div className="market-module__stats">
+              <ValueBlock label="Crypto Tape" primary={liveConnected ? "Connected" : "Stale"} secondary={topLiveQuotes.length ? `${topLiveQuotes.length} leaders tracked` : "No leaders"} tone={liveConnected ? "positive" : "muted"} />
+              <ValueBlock label="Index Tape" primary={indexLiveConnected ? "Connected" : "Stale"} secondary={topIndexQuotes.length ? `${topIndexQuotes.length} benchmarks tracked` : "No benchmarks"} tone={indexLiveConnected ? "positive" : "muted"} />
+              <ValueBlock label="Research Pack" primary={reportPathDisplay.primary} secondary={reportPathDisplay.secondary ?? "No latest export"} tone="accent" />
+            </div>
           </article>
         </div>
       </Panel>
       <Panel title="Market Coverage" eyebrow="Freshness + PIT status">
-        <div className="value-grid value-grid--status">
+        <div className="market-health-grid">
           {dataHealth.map((item) => (
             <ValueBlock
               key={`${item.market}-${item.lastRefreshAt}`}
@@ -131,56 +143,73 @@ export function OverviewPage({
               primary={`${formatPercent(item.coveragePct / 100, 1)} coverage`}
               secondary={`${formatPercent(item.tradableCoveragePct / 100, 1)} tradable / ${formatCoverageMode(item.membershipMode)}`}
               tertiary={`History from ${item.historyStartDate} / stale: ${String(item.stale)}`}
+              tone={item.stale ? "negative" : "accent"}
             />
           ))}
         </div>
       </Panel>
+      <div className="overview-market-row">
+        <Panel title="Crypto Live Tape" eyebrow="Realtime price overlay">
+          <div className="value-grid value-grid--status">
+            {topLiveQuotes.map((item) => {
+              const updated = formatDualTime(item.updatedAt);
+              return (
+                <ValueBlock
+                  key={item.symbol}
+                  label={item.symbol}
+                  primary={item.lastPrice.toLocaleString("en-US", { maximumFractionDigits: item.lastPrice >= 1000 ? 2 : 4 })}
+                  secondary={item.markPrice ? `Mark ${item.markPrice.toLocaleString("en-US", { maximumFractionDigits: item.markPrice >= 1000 ? 2 : 4 })} / 24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}` : `24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}`}
+                  tertiary={`${item.isStale ? "stale" : "live"} / ${updated.primary}`}
+                  title={updated.title}
+                  className="value-block--quote"
+                  tone={item.isStale ? "muted" : "accent"}
+                />
+              );
+            })}
+            {topLiveQuotes.length === 0 ? <div className="empty-state">Live crypto quotes are warming up.</div> : null}
+          </div>
+        </Panel>
+        <Panel title="Index Live Tape" eyebrow="Realtime index overlay">
+          <div className="value-grid value-grid--status">
+            {topIndexQuotes.map((item) => {
+              const updated = formatDualTime(item.updatedAt);
+              return (
+                <ValueBlock
+                  key={item.symbol}
+                  label={item.symbol}
+                  primary={item.lastPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  secondary={`24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}`}
+                  tertiary={`${item.isStale ? "stale" : "live"} / ${updated.primary}`}
+                  title={updated.title}
+                  className="value-block--quote"
+                  tone={item.isStale ? "muted" : "accent"}
+                />
+              );
+            })}
+            {topIndexQuotes.length === 0 ? <div className="empty-state">Live index quotes are warming up.</div> : null}
+          </div>
+        </Panel>
+      </div>
       <Panel title="Top Signals" eyebrow="Latest publish">
-        <div className="jobs-list">
+        <div className="signal-tile-grid">
           {topSignals.map((item) => (
-            <article className="job-row" key={`${item.symbol}-${item.universe}-${item.horizon}`}>
-              <strong>{item.symbol} / {formatUniverseName(item.universe)}</strong>
-              <span>{item.horizon} / {formatModelVersion(item.modelVersion).primary}</span>
-              <span>{formatPercent(item.expectedReturn, 2)} expected / {formatPercent(item.directionProbability, 0)} direction probability / {formatPercent(item.tradeConfidence, 0)} trade confidence</span>
-              <span>{item.side} / RR {(item.riskRewardRatio ?? 0).toFixed(2)}x</span>
+            <article className="signal-tile" key={`${item.symbol}-${item.universe}-${item.horizon}`}>
+              <div className="signal-tile__header">
+                <strong>{item.symbol}</strong>
+                <span className={`side-pill side-pill--${item.side}`}>{item.side}</span>
+              </div>
+              <div className="signal-tile__body">
+                <span>{formatUniverseName(item.universe)}</span>
+                <span>{item.horizon} / {formatModelVersion(item.modelVersion).primary}</span>
+              </div>
+              <div className="signal-tile__metrics">
+                <span>{formatPercent(item.expectedReturn, 2)} exp.</span>
+                <span>{formatPercent(item.directionProbability, 0)} dir.</span>
+                <span>{formatPercent(item.tradeConfidence, 0)} conf.</span>
+                <span>RR {(item.riskRewardRatio ?? 0).toFixed(2)}x</span>
+              </div>
             </article>
           ))}
-        </div>
-      </Panel>
-      <Panel title="Crypto Live Tape" eyebrow="Realtime price overlay">
-        <div className="value-grid value-grid--status">
-          {topLiveQuotes.map((item) => {
-            const updated = formatDualTime(item.updatedAt);
-            return (
-              <ValueBlock
-                key={item.symbol}
-                label={item.symbol}
-                primary={item.lastPrice.toLocaleString("en-US", { maximumFractionDigits: item.lastPrice >= 1000 ? 2 : 4 })}
-                secondary={item.markPrice ? `Mark ${item.markPrice.toLocaleString("en-US", { maximumFractionDigits: item.markPrice >= 1000 ? 2 : 4 })} / 24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}` : `24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}`}
-                tertiary={`${item.isStale ? "stale" : "live"} / ${updated.primary}`}
-                title={updated.title}
-              />
-            );
-          })}
-          {topLiveQuotes.length === 0 ? <div className="empty-state">Live crypto quotes are warming up.</div> : null}
-        </div>
-      </Panel>
-      <Panel title="Index Live Tape" eyebrow="Realtime index overlay">
-        <div className="value-grid value-grid--status">
-          {topIndexQuotes.map((item) => {
-            const updated = formatDualTime(item.updatedAt);
-            return (
-              <ValueBlock
-                key={item.symbol}
-                label={item.symbol}
-                primary={item.lastPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}
-                secondary={`24h ${formatPercent(item.priceChangePct24h ?? 0, 2)}`}
-                tertiary={`${item.isStale ? "stale" : "live"} / ${updated.primary}`}
-                title={updated.title}
-              />
-            );
-          })}
-          {topIndexQuotes.length === 0 ? <div className="empty-state">Live index quotes are warming up.</div> : null}
         </div>
       </Panel>
       <Panel title="Return Distribution" eyebrow="Cross-market">

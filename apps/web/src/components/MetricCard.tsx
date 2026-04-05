@@ -6,7 +6,9 @@ export function MetricCard({
   secondary,
   hint,
   title,
-  wide = false
+  wide = false,
+  tone = "neutral",
+  compact = false
 }: {
   label: string;
   value: ReactNode;
@@ -14,9 +16,20 @@ export function MetricCard({
   hint?: ReactNode;
   title?: string;
   wide?: boolean;
+  tone?: "neutral" | "positive" | "negative" | "accent";
+  compact?: boolean;
 }) {
+  const className = [
+    "metric-card",
+    wide ? "metric-card--wide" : "",
+    compact ? "metric-card--compact" : "",
+    tone !== "neutral" ? `metric-card--${tone}` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <article className={wide ? "metric-card metric-card--wide" : "metric-card"} title={title}>
+    <article className={className} title={title}>
       <span className="metric-card__label">{label}</span>
       <strong className="metric-card__value">{value}</strong>
       {secondary ? <span className="metric-card__secondary">{secondary}</span> : null}

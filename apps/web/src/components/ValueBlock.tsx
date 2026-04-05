@@ -6,7 +6,8 @@ export function ValueBlock({
   secondary,
   tertiary,
   title,
-  className
+  className,
+  tone = "neutral"
 }: {
   label: string;
   primary: ReactNode;
@@ -14,9 +15,11 @@ export function ValueBlock({
   tertiary?: ReactNode;
   title?: string;
   className?: string;
+  tone?: "neutral" | "positive" | "negative" | "accent" | "muted";
 }) {
+  const classes = ["value-block", className, tone !== "neutral" ? `value-block--${tone}` : ""].filter(Boolean).join(" ");
   return (
-    <article className={className ? `value-block ${className}` : "value-block"} title={title}>
+    <article className={classes} title={title}>
       <span className="value-block__label">{label}</span>
       <strong className="value-block__primary">{primary}</strong>
       {secondary ? <span className="value-block__secondary">{secondary}</span> : null}

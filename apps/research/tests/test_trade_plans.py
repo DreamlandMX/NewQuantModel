@@ -471,7 +471,7 @@ class TradePlanPanelTest(unittest.TestCase):
         self.assertGreater(float(row["riskRewardRatio"]), 1.0)
         self.assertFalse(bool(row["srUnavailable"]))
 
-    def test_filters_crypto_intraday_quantile_fallback_candidates(self) -> None:
+    def test_keeps_crypto_intraday_quantile_fallback_candidates_as_filtered_rows(self) -> None:
         asset_master = pd.DataFrame(
             [
                 {
@@ -585,8 +585,12 @@ class TradePlanPanelTest(unittest.TestCase):
 
         frame = build_trade_plan_panel(asset_master, forecasts, rankings, bars_1d, bars_1h, universes=[])
 
-        self.assertTrue(frame[(frame["symbol"] == "BTCUSDT") & (frame["horizon"] == "1H")].empty)
-        self.assertEqual(set(frame["horizon"].tolist()), {"1D"})
+        intraday = frame[(frame["symbol"] == "BTCUSDT") & (frame["horizon"] == "1H")]
+        self.assertEqual(len(intraday), 1)
+        self.assertEqual(str(intraday.iloc[0]["rebalanceFreq"]), "intraday")
+        self.assertFalse(bool(intraday.iloc[0]["actionable"]))
+        self.assertIn("no_valid_sr_setup", str(intraday.iloc[0]["rejectionReason"]))
+        self.assertEqual(set(frame["horizon"].tolist()), {"1H", "1D"})
 
     def test_keeps_crypto_intraday_when_daily_signal_has_valid_intraday_sr_structure(self) -> None:
         asset_master = pd.DataFrame(
@@ -689,6 +693,7 @@ class TradePlanPanelTest(unittest.TestCase):
         self.assertEqual(len(frame), 1)
         row = frame.iloc[0]
         self.assertEqual(str(row["horizon"]), "1H")
+        self.assertEqual(str(row["rebalanceFreq"]), "intraday")
         self.assertEqual(str(row["signalFrequency"]), "daily")
         self.assertEqual(str(row["setupType"]), "bounce_long")
         self.assertEqual(str(row["entrySource"]), "support_resistance")
